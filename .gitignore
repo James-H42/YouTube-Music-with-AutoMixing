@@ -1,0 +1,15 @@
+.build/
+build/
+.DS_Store
+dist/
+
+.claude/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+*.log
+# Local data and credentials must never be committed
+genius-token
+mixes.json
+samples.json
+*.webm
