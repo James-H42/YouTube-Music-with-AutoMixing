@@ -4,7 +4,7 @@ import Security
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case home, explore
+    case home, explore, sharedQueue
     case liked, downloads, albums, artists, savedPlaylists, history
     case localPlaylist(String)
     case remotePlaylist(String)
@@ -150,6 +150,10 @@ final class AppModel {
     var showExpandedPlayer = false
     /// The transition editor for the playing song and the next one.
     var showMixEditor = false
+    /// Sheets for choosing between lyric sources and for editing lyrics and their timing.
+    var showPlaylistImport = false
+    var showLyricsSearch = false
+    var showLyricsEditor = false
     var isBusy = false
 
     private init() {
@@ -161,6 +165,8 @@ final class AppModel {
         media.tagPendingDownloads()
         player = PlayerController(media: media, library: library, settings: settings)
         account = AccountStore(library: library)
+        Scrobbler.shared.start()
+        Task { await BlockedContent.shared.refreshAIList() }
     }
 
     // MARK: - Navigation
@@ -286,7 +292,84 @@ final class AppModel {
         }
     }
 
+    // MARK: - Backup and restore
+
+    /// Where a message about a backup is shown.
+    private func tell(_ title: String, _ text: String, style: NSAlert.Style = .informational) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.alertStyle = style
+        alert.runModal()
+    }
+
+    /// File → Back Up Library…
+    func backUpLibrary() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = "Metrolist Backup \(Date().formatted(.iso8601.year().month().day())).zip"
+        panel.message = "Saves your library, saved transitions, sample links, equalizer profiles, edited lyrics and preferences. Sign-ins, tokens and downloaded songs are not included."
+        let accessory = NSButton(checkboxWithTitle: "Include song analysis (larger, saves re-analysing)", target: nil, action: nil)
+        panel.accessoryView = accessory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        library.saveNow()
+        do {
+            let count = try LibraryBackup.create(at: url, includeAnalysis: accessory.state == .on)
+            tell("Backup saved", "\(count) items were saved to \(url.lastPathComponent).")
+        } catch {
+            tell("The backup couldn't be saved", error.localizedDescription, style: .warning)
+        }
+    }
+
+    /// File → Restore from Backup…
+    func restoreLibrary() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.message = "Choose a Metrolist backup"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let info = try LibraryBackup.inspect(url)
+            let confirm = NSAlert()
+            confirm.messageText = "Restore this backup?"
+            confirm.informativeText = "Made \(info.manifest.createdAt.formatted(date: .abbreviated, time: .shortened)), with \(info.files.count) items. It replaces your library, saved transitions, equalizer profiles, edited lyrics and preferences. A copy of what is there now is kept in Metrolist's Backups folder."
+            confirm.addButton(withTitle: "Restore")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            library.saveNow()
+            let result = try LibraryBackup.restore(from: url)
+            library.reloadFromDisk()
+            player.reloadSavedMixes()
+            MasterEQ.shared.reload()
+            BlockedContent.shared.reload()
+            tell("Backup restored", "\(result.files) items were restored. Restart Metrolist so that the preferences take effect. What was replaced is in Backups/\(result.replacedCopy?.lastPathComponent ?? "").")
+        } catch {
+            tell("Nothing was restored", error.localizedDescription, style: .warning)
+        }
+    }
+
+    /// File → Import Backup from Another App…
+    func importForeignBackup() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose a backup from Metrolist or InnerTune (Android), ViMusic or Kreate"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        isBusy = true
+        Task {
+            defer { isBusy = false }
+            do {
+                let foreign = try await Task.detached { try ForeignBackup.read(url) }.value
+                let summary = library.importForeign(foreign)
+                tell("Backup imported", "From \(foreign.family): \(summary.text).")
+            } catch {
+                tell("Nothing was imported", error.localizedDescription, style: .warning)
+            }
+        }
+    }
+
     func shutdown() {
+        DeviceConnect.shared.shutdown()
+        // A shared queue ends when the app quits; nothing is left listening for guests.
+        DeviceConnect.guests.shutdown()
+        SharedQueueClient.shared.leave()
         player.saveState()
         library.saveNow()
     }

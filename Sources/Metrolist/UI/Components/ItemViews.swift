@@ -17,12 +17,16 @@ struct ItemMenu: View {
             Button("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") {
                 Task { model.player.enqueue(await model.songs(of: item)) }
             }
+            AddToSharedQueueButton { await model.songs(of: item) }
             Divider()
             Button(model.library.isSaved(item) ? "Remove from Library" : "Add to Library",
                    systemImage: model.library.isSaved(item) ? "minus.circle" : "plus.circle") {
                 model.library.toggleSaved(item)
             }
-            if case .artist = item {} else {
+            if case .artist(let artist) = item {
+                Divider()
+                HideArtistButtons(artists: [ArtistRef(name: artist.title, id: artist.id)])
+            } else {
                 Button("Download", systemImage: "arrow.down.circle") { model.download(item) }
             }
         }

@@ -17,7 +17,7 @@ enum YTMusic {
             ? json.first("sectionListRenderer")
             : json["continuationContents"]["sectionListContinuation"]
         return HomePage(
-            sections: Parser.sections(list["contents"]),
+            sections: ContentFilter.shared.filter(Parser.sections(list["contents"])),
             continuation: list["continuations"][0]["nextContinuationData"]["continuation"].string
         )
     }
@@ -46,11 +46,11 @@ enum YTMusic {
         return json.collect(["searchSuggestionRenderer"]).compactMap { $0.value["suggestion"].text }
     }
 
-    static func search(_ query: String, filter: SearchFilter = .all, continuation: String? = nil) async throws -> SearchResults {
+    static func search(_ query: String, filter: SearchFilter = .all, continuation: String? = nil, hidingBlocked: Bool = true) async throws -> SearchResults {
         if let continuation {
             let json = try await api.post("search", body: [:], query: ["ctoken": continuation, "continuation": continuation, "type": "next"])
             let shelf = json["continuationContents"]["musicShelfContinuation"]
-            let items = shelf["contents"].array.compactMap(Parser.item)
+            let items = shelf["contents"].array.compactMap(Parser.item).filter { !hidingBlocked || !ContentFilter.shared.isBlocked($0) }
             return SearchResults(
                 sections: items.isEmpty ? [] : [ItemSection(title: "", items: items, isList: true)],
                 continuation: shelf["continuations"][0]["nextContinuationData"]["continuation"].string
@@ -81,7 +81,7 @@ enum YTMusic {
             }
         }
         return SearchResults(
-            sections: sections,
+            sections: hidingBlocked ? ContentFilter.shared.filter(sections) : sections,
             continuation: filter == .all ? nil : json.first("musicShelfRenderer")["continuations"][0]["nextContinuationData"]["continuation"].string
         )
     }

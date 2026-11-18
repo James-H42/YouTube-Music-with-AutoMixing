@@ -88,11 +88,17 @@ final class PlayerController {
     @ObservationIgnored private var gaplessKey: String?
     /// Song already reported to the signed-in account's listening history.
     @ObservationIgnored private var reportedPlayFor: String?
+    /// When the current listen began, how long it has really been played, and whether it was scrobbled.
+    @ObservationIgnored private var listenStartedAt = Date()
+    @ObservationIgnored private var listenPlayed = 0.0
+    @ObservationIgnored private var scrobbledFor: String?
     @ObservationIgnored private var analysisRequested: Set<String> = []
     /// Lyrics fetched ahead of time for mix planning (nil: looked for, none found).
     @ObservationIgnored private var mixLyrics: [String: Lyrics?] = [:]
     @ObservationIgnored private var mixLyricsRequested: Set<String> = []
     @ObservationIgnored private var planning: Set<String> = []
+    /// Counts changes to lyrics, so a plan made from older lyrics is thrown away.
+    @ObservationIgnored private var lyricsEpoch = 0
     /// Pairs of songs a sample database links, by pair. Observed: finding one re-plans the pair.
     private var sampleRelations: [String: SampleRelation] = [:]
     @ObservationIgnored private var sampleLookups: Set<String> = []
@@ -121,6 +127,9 @@ final class PlayerController {
                 self.mixActivity = activity
             }
         }
+        // Play through the output chosen last time, and follow later choices.
+        engine.setOutputDevice(OutputDevices.shared.selectedID)
+        OutputDevices.shared.onChange = { [weak self] id in self?.engine.setOutputDevice(id) }
         nowPlaying = NowPlayingBridge(player: self)
         if let data = try? Data(contentsOf: AppPaths.mixes), let saved = try? JSONDecoder().decode([String: MixPlan].self, from: data) {
             // Earlier versions saved a proposal as soon as it was picked to be heard. Those were
@@ -178,10 +187,27 @@ final class PlayerController {
     /// AutoMix is on and applies to what is playing.
     var autoMixActive: Bool { settings.autoMix && autoMixAvailable }
 
+    /// A video next in the queue may still be swapped for its audio release when it starts
+    /// (Settings → "Prefer audio versions"). Until the lookup has answered, nobody knows which
+    /// recording will play, so it can't be analysed yet. Once it has, the pair is planned against
+    /// whatever will really play: the audio release, or the video's own audio when there is none.
+    private func awaitingAudioVersion(_ song: Song) -> Bool {
+        settings.preferAudioVersions && song.isVideo && !media.isAvailableOffline(song.id) && counterparts[song.id] == nil
+    }
+
     private func mixEligible(_ current: Song, _ next: Song) -> Bool {
-        guard repeatMode != .one, !(settings.preferAudioVersions && next.isVideo) else { return false }
+        guard repeatMode != .one, !awaitingAudioVersion(next) else { return false }
         if !settings.mixAlbums, let album = current.album?.id, album == next.album?.id { return false }
         return true
+    }
+
+    /// Why there is no transition to show for the next track (for the queue's transition row).
+    var mixSkipReason: String {
+        guard let current = currentSong, let next = nextSong else { return "Nothing queued to mix into" }
+        if repeatMode == .one { return "Repeats this song" }
+        if awaitingAudioVersion(next) { return "Looking for the audio version of the next track…" }
+        if !settings.mixAlbums, let album = current.album?.id, album == next.album?.id { return "Plays straight through (same album)" }
+        return "Plays straight through"
     }
 
     /// The pair AutoMix would mix next, if there is one.
@@ -231,7 +257,78 @@ final class PlayerController {
         guard let pair = mixPair else { return nil }
         let key = pairKey(pair.current, pair.next)
         if let trial = mixAudition, trial.key == key { return trial.plan }
-        return customMixes[key] ?? mixCandidates[candidateKey(pair.current, pair.next)]?.first
+        return customMixes[key] ?? lateChoice[key] ?? mixCandidates[candidateKey(pair.current, pair.next)]?.first
+    }
+
+    // MARK: - Play Next
+
+    /// Songs chosen with Play Next (by id). While they wait directly after the playing song,
+    /// nothing re-orders them: AutoMix's Autoplay ordering, shuffle and shared-queue guests all
+    /// work behind them.
+    @ObservationIgnored private var playNextIds: Set<String> = []
+    /// For one play of a pair: the transition chosen because the best one could no longer be
+    /// reached when the next song was decided (a late Play Next). Never saved.
+    @ObservationIgnored private var lateChoice: [String: MixPlan] = [:]
+    @ObservationIgnored private var choiceChecked: Set<String> = []
+
+    /// The next song when a transition into it is already audible (before the hand-over).
+    private var audibleIncomingIndex: Int? {
+        guard mixActivity != nil, let currentIndex, currentIndex + 1 < queue.count,
+              gaplessKey?.hasPrefix("\(queue[currentIndex].id)|\(queue[currentIndex + 1].id)|mix") == true else { return nil }
+        return currentIndex + 1
+    }
+
+    /// Where Play Next puts songs: straight after the playing song, or after the one already
+    /// fading in, which can't be taken back.
+    var playNextIndex: Int { (audibleIncomingIndex ?? currentIndex ?? -1) + 1 }
+
+    /// The first upcoming place that may be re-ordered or inserted before: after a song already
+    /// fading in and after the Play Next songs waiting at the front.
+    var firstFlexibleIndex: Int {
+        guard currentIndex != nil else { return 0 }
+        var index = playNextIndex
+        while index < queue.count, playNextIds.contains(queue[index].id) { index += 1 }
+        return index
+    }
+
+    func isPlayNext(_ id: String) -> Bool { playNextIds.contains(id) }
+
+    /// The listener (or their own phone) queued these: Autoplay's mark goes, so AutoMix never
+    /// moves them, and Play Next songs are held at the front.
+    func markQueuedByHand(_ ids: [String], playNext: Bool) {
+        for id in ids {
+            autoQueued[id] = nil
+            if playNext { playNextIds.insert(id) }
+        }
+    }
+
+    /// Once the next song is known, makes sure the transition into it can still happen: if the
+    /// best one's mix point (or the tempo approach before it) has already gone by, the best one
+    /// still ahead is used for this play instead. Checked once per pair and play, so seeking
+    /// never switches transitions, and the ranking itself is untouched.
+    private func chooseReachablePlan(_ current: Song, _ next: Song) {
+        let key = pairKey(current, next)
+        guard !choiceChecked.contains(key), customMixes[key] == nil, mixAudition == nil,
+              let plans = mixCandidates[candidateKey(current, next)], let best = plans.first, currentSong?.id == current.id
+        else { return }
+        choiceChecked.insert(key)
+        let now = position
+        func reachable(_ plan: MixPlan) -> Bool { plan.outStart - (plan.approach ?? 0) > now + 2 }
+        guard !reachable(best) else { return }
+        let chosen = plans.first(where: reachable) ?? plans.first { $0.approach == nil && $0.outStart > now + 4 }
+        if let chosen {
+            lateChoice[key] = chosen
+            MixLog.write(String(format: "next track decided at %.1f s, after %@ could start; using %@ (out at %.2f s)", now, best.summary, chosen.summary, chosen.outStart))
+        } else {
+            MixLog.write(String(format: "next track decided at %.1f s; no transition can still be reached, it follows without one", now))
+        }
+    }
+
+    /// A song has become the playing one: it no longer waits, and per-play choices reset.
+    private func becameCurrent(_ song: Song) {
+        playNextIds.remove(song.id)
+        lateChoice = [:]
+        choiceChecked = []
     }
 
     /// A proposal or preset is being tried out for the upcoming pair without being kept.
@@ -351,6 +448,15 @@ final class PlayerController {
         if !isPlaying { play() }
     }
 
+    /// Reads the saved transitions again, after a restore replaced the file.
+    func reloadSavedMixes() {
+        mixAudition = nil
+        customMixes = [:]
+        if let data = try? Data(contentsOf: AppPaths.mixes), let saved = try? JSONDecoder().decode([String: MixPlan].self, from: data) {
+            customMixes = saved.filter { $0.value.preset != .auto }
+        }
+    }
+
     private func saveMixes() {
         let snapshot = customMixes
         Task.detached(priority: .utility) {
@@ -368,6 +474,9 @@ final class PlayerController {
         unshuffledQueue?.append(contentsOf: songs)
     }
 
+    /// Whether Autoplay (rather than a person) put this song in the queue.
+    func isAutoQueued(_ id: String) -> Bool { autoQueued[id] != nil }
+
     /// AutoMix is choosing the order of the songs Autoplay lines up.
     private var sequencesAutoQueue: Bool { settings.autoMix && settings.mixOrdersQueue && settings.mixStyle == .smart }
 
@@ -376,6 +485,9 @@ final class PlayerController {
     private func sequenceAutoQueue() {
         guard sequencesAutoQueue, let currentIndex, let current = currentSong else { return }
         let start = currentIndex + 1
+        // Play Next songs (and one already fading in) come first; Autoplay's order is chosen
+        // to follow the playing song, so it waits until they have played.
+        guard firstFlexibleIndex == start else { return }
         var end = start
         while end < queue.count, end - start < MixSequencer.pool, autoQueued[queue[end].id] != nil { end += 1 }
         guard end - start >= 2 else { return }
@@ -416,6 +528,7 @@ final class PlayerController {
     private func prepareMix() {
         sequenceAutoQueue()
         guard settings.autoMix, let current = currentSong else { return }
+        resolveNextAudioVersion()
         let next = nextSong.flatMap { mixEligible(current, $0) ? $0 : nil }
         // A transition that was only being tried out does not outlive its pair of songs.
         if let trial = mixAudition, trial.key != next.map({ pairKey(current, $0) }) { mixAudition = nil }
@@ -455,20 +568,59 @@ final class PlayerController {
             }
         }
         let key = candidateKey(current, next)
+        chooseReachablePlan(current, next)
         guard mixCandidates[key] == nil, !planning.contains(key),
               let a = analyses[current.id], let b = analyses[next.id],
               let lyricsA = mixLyrics[current.id], let lyricsB = mixLyrics[next.id]
         else { return }
         planning.insert(key)
+        let epoch = lyricsEpoch
         var options = settings.mixOptions
         options.relation = sampleRelation(current, next)
         Task {
             let plans = await Task.detached(priority: .userInitiated) {
                 MixPlanner.candidates(from: a, to: b, lyricsA: lyricsA, lyricsB: lyricsB, options: options)
             }.value
-            mixCandidates[key] = plans
             planning.remove(key)
+            if epoch == lyricsEpoch {
+                mixCandidates[key] = plans
+                chooseReachablePlan(current, next)
+            }
         }
+    }
+
+    @ObservationIgnored private var resolvingAudio: Set<String> = []
+
+    /// Tests: what the audio-release lookup will answer for a video, without the network.
+    func setAudioVersionForTesting(_ videoId: String, _ audio: Song?) { counterparts[videoId] = .some(audio) }
+
+    /// Does ahead of time what `loadCurrent` does when a video starts: finds its audio release
+    /// and puts it in the queue, so AutoMix analyses and plans against what will really play.
+    private func resolveNextAudioVersion() {
+        guard let currentIndex, currentIndex + 1 < queue.count else { return }
+        let next = queue[currentIndex + 1]
+        guard settings.preferAudioVersions, next.isVideo, !media.isAvailableOffline(next.id) else { return }
+        if let known = counterparts[next.id] {
+            if let audio = known { replaceUpcoming(next, with: audio) }
+            return
+        }
+        guard !resolvingAudio.contains(next.id) else { return }
+        resolvingAudio.insert(next.id)
+        Task {
+            _ = await audioVersion(of: next)
+            resolvingAudio.remove(next.id)
+            prepareMix()
+        }
+    }
+
+    private func replaceUpcoming(_ video: Song, with audio: Song) {
+        guard let currentIndex, currentIndex + 1 < queue.count, queue[currentIndex + 1].id == video.id else { return }
+        queue[currentIndex + 1] = audio
+        if let index = unshuffledQueue?.firstIndex(where: { $0.id == video.id }) { unshuffledQueue?[index] = audio }
+        if let order = autoQueued[video.id] { autoQueued[audio.id] = order }
+        library.remember([audio])
+        MixLog.write("next track: \(video.title) is a video; its audio release \(audio.title) [\(audio.id)] will play and is mixed into")
+        persist()
     }
 
     // MARK: - Starting playback
@@ -489,6 +641,7 @@ final class PlayerController {
             index = 0
         }
         queue = songs
+        playNextIds = []
         radioContinuation = nil
         library.remember(songs)
         start(index: index)
@@ -510,8 +663,19 @@ final class PlayerController {
             play(songs)
             return
         }
-        queue.insert(contentsOf: songs, at: currentIndex + 1)
+        let at = playNextIndex
+        let after = queue[at - 1]
+        queue.insert(contentsOf: songs, at: at)
+        markQueuedByHand(songs.map(\.id), playNext: true)
+        // The order to return to when shuffle is switched off has them in the same place.
+        if var original = unshuffledQueue {
+            let place = original.firstIndex(of: after).map { $0 + 1 } ?? min(original.count, currentIndex + 1)
+            original.insert(contentsOf: songs, at: place)
+            unshuffledQueue = original
+        }
         persist()
+        // Plan for the new pair now, not on the next tick, so what's shown is what will play.
+        prepareMix()
     }
 
     func enqueue(_ songs: [Song]) {
@@ -522,6 +686,8 @@ final class PlayerController {
             return
         }
         queue.append(contentsOf: songs)
+        markQueuedByHand(songs.map(\.id), playNext: false)
+        unshuffledQueue?.append(contentsOf: songs)
         persist()
     }
 
@@ -530,9 +696,46 @@ final class PlayerController {
         start(index: index)
     }
 
+    /// Device Connect: a paired phone has set the queue, the song and whether it plays. When the
+    /// playing song is still the same one, playback carries on without a restart.
+    func applyRemoteQueue(_ songs: [Song], index: Int, position: Double, playing: Bool, restart: Bool) {
+        let previous = currentSong?.id
+        unshuffledQueue = nil
+        shuffle = false
+        // Songs Autoplay added keep that mark while they are still queued, so a remote edit
+        // (a phone adding one song) doesn't stop AutoMix from ordering the rest.
+        let kept = Set(songs.map(\.id))
+        autoQueued = autoQueued.filter { kept.contains($0.key) }
+        playNextIds = playNextIds.filter { kept.contains($0) }
+        library.remember(songs)
+        guard songs.indices.contains(index) else {
+            queue = []
+            currentIndex = nil
+            isPlaying = false
+            engine.pause()
+            persist()
+            publishNowPlaying()
+            return
+        }
+        queue = songs
+        if !restart, previous == songs[index].id, !needsLoad {
+            currentIndex = index
+            persist()
+            return
+        }
+        currentIndex = index
+        isPlaying = playing
+        errorMessage = nil
+        loadCurrent(at: position)
+        extendQueueIfNeeded()
+    }
+
     func removeFromQueue(at index: Int) {
         guard queue.indices.contains(index), index != currentIndex else { return }
-        queue.remove(at: index)
+        let removed = queue.remove(at: index)
+        if !queue.contains(where: { $0.id == removed.id }) { playNextIds.remove(removed.id) }
+        if let place = unshuffledQueue?.firstIndex(of: removed) { unshuffledQueue?.remove(at: place) }
+        prepareMix()
         if let currentIndex, index < currentIndex { self.currentIndex = currentIndex - 1 }
         persist()
     }
@@ -542,13 +745,29 @@ final class PlayerController {
         let current = currentSong
         let song = queue.remove(at: source)
         queue.insert(song, at: destination > source ? destination - 1 : destination)
+        // Moved by hand: the listener has placed it themselves.
+        playNextIds.remove(song.id)
+        prepareMix()
         if let current { currentIndex = queue.firstIndex(of: current) }
         persist()
+    }
+
+    /// Takes the songs of artists that were just hidden out of what's coming up.
+    func removeBlockedFromUpcoming() {
+        guard let currentIndex else { return }
+        let before = queue.count
+        var index = queue.count - 1
+        while index > currentIndex {
+            if ContentFilter.shared.isBlocked(queue[index]) { queue.remove(at: index) }
+            index -= 1
+        }
+        if queue.count != before { persist() }
     }
 
     func clearUpcoming() {
         guard let currentIndex, currentIndex + 1 < queue.count else { return }
         queue.removeSubrange((currentIndex + 1)...)
+        playNextIds = []
         radioContinuation = nil
         persist()
     }
@@ -615,20 +834,26 @@ final class PlayerController {
             return
         }
         let current = queue[currentIndex]
+        // Play Next songs (and one already fading in) stay where they are either way.
+        let held = Array(queue[(currentIndex + 1) ..< firstFlexibleIndex])
         if shuffle {
             shuffle = false
-            if let original = unshuffledQueue, let index = original.firstIndex(of: current) {
-                queue = original
-                self.currentIndex = index
+            if var original = unshuffledQueue {
+                for song in held { if let place = original.firstIndex(of: song) { original.remove(at: place) } }
+                if let index = original.firstIndex(of: current) {
+                    original.insert(contentsOf: held, at: index + 1)
+                    queue = original
+                    self.currentIndex = index
+                }
             }
             unshuffledQueue = nil
         } else {
             shuffle = true
             unshuffledQueue = queue
             var rest = queue
-            rest.remove(at: currentIndex)
+            rest.removeSubrange(currentIndex ..< currentIndex + 1 + held.count)
             rest.shuffle()
-            queue = [current] + rest
+            queue = [current] + held + rest
             self.currentIndex = 0
         }
         persist()
@@ -664,10 +889,58 @@ final class PlayerController {
         fetchLyrics(for: song, forceRefresh: true)
     }
 
+    /// Uses lyrics the listener picked from a search for the playing song.
+    func useLyrics(_ candidate: LyricsCandidate) {
+        guard let song = currentSong else { return }
+        Task {
+            await LyricsService.shared.removeUserCopy(for: song.id)
+            await LyricsService.shared.store(candidate.lyrics, for: song.id)
+            lyricsDidChange(for: song.id, to: candidate.lyrics)
+        }
+    }
+
+    /// Saves lyrics the listener edited for the playing song.
+    func saveEditedLyrics(_ edited: Lyrics) {
+        guard let song = currentSong else { return }
+        Task {
+            await LyricsService.shared.saveUser(edited, for: song.id)
+            lyricsDidChange(for: song.id, to: await LyricsService.shared.cached(song.id))
+        }
+    }
+
+    /// Goes back to the provider's lyrics for the playing song, dropping the listener's edits.
+    func discardEditedLyrics() {
+        guard let song = currentSong else { return }
+        Task {
+            await LyricsService.shared.removeUserCopy(for: song.id)
+            let found = await LyricsService.shared.fetch(for: song, duration: Double(song.duration ?? 0), forceRefresh: true)
+            lyricsDidChange(for: song.id, to: found)
+        }
+    }
+
+    /// New lyrics change where the singing is, so the transitions AutoMix planned for pairs with
+    /// this song are planned again. Transitions the listener saved are never touched.
+    private func lyricsDidChange(for videoId: String, to new: Lyrics?) {
+        lyricsEpoch += 1
+        mixLyrics[videoId] = .some(new)
+        mixLyricsRequested.insert(videoId)
+        for key in mixCandidates.keys where key.split(separator: "|").prefix(2).contains(where: { $0 == videoId }) {
+            mixCandidates[key] = nil
+        }
+        planning.removeAll()
+        if currentSong?.id == videoId {
+            lyrics = new
+            lyricsRequestedFor = videoId
+        }
+        MixLog.write("lyrics changed for \(videoId): transitions with it are planned again")
+        prepareMix()
+    }
+
     // MARK: - Loading
 
     private func start(index: Int) {
         currentIndex = index
+        if queue.indices.contains(index) { becameCurrent(queue[index]) }
         isPlaying = true
         errorMessage = nil
         loadCurrent(at: 0)
@@ -747,6 +1020,7 @@ final class PlayerController {
                 if isPlaying, recordedPlayFor != song.id {
                     recordedPlayFor = song.id
                     library.recordPlay(song)
+                    beginListen(song)
                 }
             }
             publishNowPlaying()
@@ -782,6 +1056,7 @@ final class PlayerController {
         loadToken += 1
         let song = queue[currentIndex + 1]
         self.currentIndex = currentIndex + 1
+        becameCurrent(song)
         gaplessKey = nil
         position = 0
         duration = engine.duration > 0 ? engine.duration : Double(song.duration ?? 0)
@@ -790,10 +1065,20 @@ final class PlayerController {
         media.protectedId = song.id
         recordedPlayFor = song.id
         library.recordPlay(song)
+        beginListen(song)
         fetchLyrics(for: song)
         publishNowPlaying()
         persist()
         extendQueueIfNeeded()
+    }
+
+    /// A song has started to be heard: for AutoMix that is the hand-over, half-way through the
+    /// overlap. Tells the scrobbling services what is now playing.
+    private func beginListen(_ song: Song) {
+        listenStartedAt = Date()
+        listenPlayed = 0
+        scrobbledFor = nil
+        Scrobbler.shared.nowPlaying(song, duration: duration)
     }
 
     private func trackEnded() {
@@ -836,6 +1121,12 @@ final class PlayerController {
             reportedPlayFor = playing.id
             Task { try? await YTMusic.reportPlayback(videoId: playing.id) }
         }
+        // A listen counts after half the song, or four minutes, of actual playing.
+        if status == .ready { listenPlayed += 0.25 }
+        if scrobbledFor != playing.id, recordedPlayFor == playing.id, Scrobbler.counts(position: listenPlayed, duration: duration) {
+            scrobbledFor = playing.id
+            Scrobbler.shared.scrobble(playing, duration: duration, started: listenStartedAt)
+        }
         prepareMix()
         // Hand the next track to the engine ahead of time: with a mix plan it is cued for a
         // DJ-style transition, otherwise it follows without a gap.
@@ -843,7 +1134,7 @@ final class PlayerController {
         var plan: MixPlan?
         if currentIndex + 1 < queue.count, repeatMode != .one {
             let upcoming = queue[currentIndex + 1]
-            if !(settings.preferAudioVersions && upcoming.isVideo) {
+            if !awaitingAudioVersion(upcoming) {
                 let pair = "\(queue[currentIndex].id)|\(upcoming.id)"
                 // The plan's signature is part of the key, so an edit re-cues the transition.
                 if let mix = nextMixPlan, position < mix.outStart - 0.5 || gaplessKey == pair + "|mix|\(mix.signature)" {
@@ -885,12 +1176,18 @@ final class PlayerController {
                 return
             }
             let existing = Set(queue.map(\.id))
-            let fresh = page.songs.filter { !existing.contains($0.id) }
+            let unseen = page.songs.filter { !existing.contains($0.id) }
+            // Hidden artists and the AI-artist list are filtered out here, before anything is
+            // queued, so their songs are never downloaded or analysed.
+            let fresh = ContentFilter.shared.filter(unseen)
             appendAutoQueued(fresh)
             radioContinuation = page.continuation
             library.remember(fresh)
-            // Stop asking when the radio has nothing new, to avoid a request loop.
-            if fresh.isEmpty {
+            if fresh.isEmpty, !unseen.isEmpty {
+                // Everything on this page was filtered: look at the next one soon.
+                extendBlockedUntil = Date().addingTimeInterval(2)
+            } else if fresh.isEmpty {
+                // Stop asking when the radio has nothing new, to avoid a request loop.
                 radioContinuation = nil
                 extendBlockedUntil = Date().addingTimeInterval(120)
             }

@@ -54,6 +54,7 @@ struct SidebarView: View {
             Section {
                 row("Home", "house", SidebarItem.home)
                 row("Explore", "safari", SidebarItem.explore)
+                row("Shared Queue", "person.2.wave.2", SidebarItem.sharedQueue, badge: DeviceConnect.guests.connected.count)
             }
 
             Section("Library") {
@@ -189,6 +190,16 @@ struct RootView: View {
         .sheet(isPresented: Bindable(model).showMixEditor) {
             MixEditorView().environment(model)
         }
+        .modifier(PairingRequestPresenter())
+        .sheet(isPresented: Bindable(model).showPlaylistImport) {
+            PlaylistImportSheet().environment(model)
+        }
+        .sheet(isPresented: Bindable(model).showLyricsSearch) {
+            LyricsSearchSheet().environment(model)
+        }
+        .sheet(isPresented: Bindable(model).showLyricsEditor) {
+            LyricsEditorSheet().environment(model)
+        }
     }
 
     @ViewBuilder
@@ -209,6 +220,9 @@ struct RootView: View {
             HomeView()
         case .explore:
             ExploreView()
+        case .sharedQueue:
+            SharedQueueView()
+                .navigationTitle("Shared Queue")
         case .liked:
             LikedSongsView()
         case .downloads:

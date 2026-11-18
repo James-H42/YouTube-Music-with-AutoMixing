@@ -10,6 +10,9 @@ final class AppSettings {
     var preferAudioVersions: Bool { didSet { defaults.set(preferAudioVersions, forKey: "preferAudioVersions") } }
     var normalizeVolume: Bool { didSet { defaults.set(normalizeVolume, forKey: "normalizeVolume") } }
     /// Keep playing similar music when the queue runs out.
+    /// Where tracks are levelled to, and whether quiet ones may be raised (by up to 3 dB).
+    var normalizationLevel: NormalizationLevel { didSet { defaults.set(normalizationLevel.rawValue, forKey: "normalizationLevel"); applySound() } }
+    var normalizationBoost: Bool { didSet { defaults.set(normalizationBoost, forKey: "normalizationBoost"); applySound() } }
     var autoplay: Bool { didSet { defaults.set(autoplay, forKey: "autoplay") } }
     var maxCacheGB: Double { didSet { defaults.set(maxCacheGB, forKey: "maxCacheGB") } }
     var showMenuBarPlayer: Bool { didSet { defaults.set(showMenuBarPlayer, forKey: "showMenuBarPlayer") } }
@@ -60,6 +63,8 @@ final class AppSettings {
         preferAudioVersions = defaults.bool(forKey: "preferAudioVersions")
         normalizeVolume = defaults.bool(forKey: "normalizeVolume")
         autoplay = defaults.bool(forKey: "autoplay")
+        normalizationLevel = NormalizationLevel(rawValue: defaults.string(forKey: "normalizationLevel") ?? "") ?? .normal
+        normalizationBoost = defaults.bool(forKey: "normalizationBoost")
         maxCacheGB = defaults.double(forKey: "maxCacheGB")
         showMenuBarPlayer = defaults.bool(forKey: "showMenuBarPlayer")
         miniPlayerOnTop = defaults.bool(forKey: "miniPlayerOnTop")
@@ -75,5 +80,13 @@ final class AppSettings {
         geniusToken = SampleDatabase.geniusToken ?? ""
         volume = defaults.double(forKey: "volume")
         accountPlayback = defaults.bool(forKey: "accountPlayback")
+        applySound()
+    }
+
+    private func applySound() {
+        Normalization.level = normalizationLevel
+        Normalization.allowsBoost = normalizationBoost
+        // Raising a quiet track, or a loud target, can push the sum past full scale.
+        MasterEQ.shared.boostsLevel = normalizationBoost || normalizationLevel == .loud
     }
 }

@@ -10,6 +10,7 @@ struct SongMenu: View {
         Button("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") { model.player.playNext([song]) }
         Button("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") { model.player.enqueue([song]) }
         Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { model.player.playRadio(for: song) }
+        AddToSharedQueueButton { [song] }
         Divider()
         Button(model.library.isLiked(song.id) ? "Remove from Liked Songs" : "Add to Liked Songs",
                systemImage: model.library.isLiked(song.id) ? "heart.slash" : "heart") {
@@ -48,6 +49,27 @@ struct SongMenu: View {
         Button("Copy Link", systemImage: "link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString("https://music.youtube.com/watch?v=\(song.id)", forType: .string)
+        }
+        if !song.artists.isEmpty {
+            Divider()
+            HideArtistButtons(artists: song.artists)
+        }
+    }
+}
+
+/// "Hide songs by …" for each artist: they stop being added by Autoplay and drop out of search and home.
+struct HideArtistButtons: View {
+    let artists: [ArtistRef]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ForEach(Array(artists.enumerated()), id: \.offset) { _, artist in
+            if !BlockedContent.shared.isHidden(artist) {
+                Button(artists.count > 1 ? "Hide Songs by \(artist.name)" : "Hide This Artist", systemImage: "eye.slash") {
+                    BlockedContent.shared.hide(artist)
+                    model.player.removeBlockedFromUpcoming()
+                }
+            }
         }
     }
 }

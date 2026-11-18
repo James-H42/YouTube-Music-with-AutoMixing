@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 if CommandLine.arguments.contains("--probe") {
@@ -130,6 +131,169 @@ if CommandLine.arguments.contains("--webprobe") {
 
 if CommandLine.arguments.contains("--potoken") {
     await Probe.poTokenTest()
+    exit(0)
+}
+
+// `--lyricsprobe videoId`: what every lyrics source returns for a song of the library.
+if let flag = CommandLine.arguments.firstIndex(of: "--lyricsprobe"), CommandLine.arguments.count > flag + 1 {
+    let id = CommandLine.arguments[flag + 1]
+    let song = await MainActor.run { LibraryStore().song(id) } ?? Song(id: id, title: CommandLine.arguments.count > flag + 2 ? CommandLine.arguments[flag + 2] : id)
+    let found = await LyricsService.shared.search(for: song, duration: Double(song.duration ?? 0))
+    print("\(song.title) — \(song.artistText): \(found.count) results")
+    for candidate in found {
+        let words = candidate.lyrics.lines.filter { !$0.words.isEmpty }.count
+        print(String(format: "  %-14@ %@ %d lines, %d with word timing — %@", candidate.source.title as NSString, candidate.lyrics.isSynced ? "synced" : "plain ", candidate.lyrics.lines.count, words,
+                     candidate.lyrics.lines.first(where: { !$0.text.isEmpty })?.text ?? ""))
+    }
+    exit(0)
+}
+
+// `--backup out.zip [--analysis]`, `--restore in.zip`, `--inspect file` and `--importforeign file`
+// work on the data folder (METROLIST_HOME) without opening the app.
+if let flag = CommandLine.arguments.firstIndex(of: "--backup"), CommandLine.arguments.count > flag + 1 {
+    do {
+        let count = try LibraryBackup.create(at: URL(fileURLWithPath: CommandLine.arguments[flag + 1]), includeAnalysis: CommandLine.arguments.contains("--analysis"))
+        print("backed up \(count) files")
+    } catch { print("FAILED:", error.localizedDescription); exit(1) }
+    exit(0)
+}
+if let flag = CommandLine.arguments.firstIndex(of: "--restore"), CommandLine.arguments.count > flag + 1 {
+    do {
+        let result = try LibraryBackup.restore(from: URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+        print("restored \(result.files) files and \(result.settings) settings; previous data kept in \(result.replacedCopy?.lastPathComponent ?? "-")")
+    } catch { print("REJECTED:", error.localizedDescription); exit(1) }
+    exit(0)
+}
+if let flag = CommandLine.arguments.firstIndex(of: "--inspect"), CommandLine.arguments.count > flag + 1 {
+    do {
+        let info = try LibraryBackup.inspect(URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+        print("Metrolist backup, format \(info.manifest.formatVersion), made \(info.manifest.createdAt): \(info.files.count) files")
+    } catch { print("REJECTED:", error.localizedDescription); exit(1) }
+    exit(0)
+}
+if let flag = CommandLine.arguments.firstIndex(of: "--importforeign"), CommandLine.arguments.count > flag + 1 {
+    do {
+        let foreign = try ForeignBackup.read(URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+        print("\(foreign.family): \(foreign.songs.count) songs, \(foreign.playlists.count) playlists, \(foreign.plays.count) plays, \(foreign.artists.count) artists, \(foreign.albums.count) albums")
+        let summary = await MainActor.run { () -> ImportSummary in
+            let library = LibraryStore()
+            let summary = library.importForeign(foreign)
+            library.saveNow()
+            return summary
+        }
+        print(summary.text)
+    } catch { print("REJECTED:", error.localizedDescription); exit(1) }
+    exit(0)
+}
+
+// `--importplaylist <address or file> [--limit n]`: reads a playlist and matches its tracks on YouTube Music.
+if let flag = CommandLine.arguments.firstIndex(of: "--importplaylist"), CommandLine.arguments.count > flag + 1 {
+    let source = CommandLine.arguments[flag + 1]
+    let limit = CommandLine.arguments.firstIndex(of: "--limit").flatMap { Int(CommandLine.arguments[$0 + 1]) } ?? 8
+    do {
+        let playlist = source.hasPrefix("https://") ? try await PlaylistImporter.load(address: source) : try PlaylistImporter.load(file: URL(fileURLWithPath: source))
+        print("“\(playlist.name)”: \(playlist.tracks.count) tracks read")
+        let sample = Array(playlist.tracks.prefix(limit))
+        let matches = await TrackMatcher.matchAll(sample) { _ in }
+        for match in matches {
+            print(String(format: "  %-9@ %@ — %@ (%@ s) → %@", "\(match.kind)" as NSString, match.track.title, match.track.artist, match.track.duration.map(String.init) ?? "?",
+                         match.chosen.map { "\($0.title) — \($0.artistText) [\($0.id)] \($0.duration.map(String.init) ?? "?") s\($0.isVideo ? " VIDEO" : "")" } ?? "none"))
+        }
+    } catch { print("FAILED:", error.localizedDescription); exit(1) }
+    exit(0)
+}
+
+// `--outputs`: the outputs Core Audio lists. `--outputtest`: plays silence through each in turn
+// and checks that the engine really moves to it.
+if CommandLine.arguments.contains("--outputs") {
+    let devices = OutputDevices.listOutputs()
+    let current = OutputDevices.defaultOutput()
+    for device in devices { print("\(device.id == current ? "*" : " ") \(device.name) [\(device.uid)] transport \(String(format: "%08x", device.transport))\(device.isAirPlay ? " AirPlay" : "")") }
+    print("\(devices.count) outputs; * is the system default")
+    exit(0)
+}
+if CommandLine.arguments.contains("--chaintest") {
+    await OutputTest.chain()
+    exit(0)
+}
+if CommandLine.arguments.contains("--outputtest") {
+    await OutputTest.run()
+    exit(0)
+}
+
+// `--dcserve seconds`: listens as Device Connect would, without touching the saved setting.
+if let flag = CommandLine.arguments.firstIndex(of: "--dcserve") {
+    let seconds = CommandLine.arguments.count > flag + 1 ? Double(CommandLine.arguments[flag + 1]) ?? 30 : 30
+    await MainActor.run {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        DeviceConnect.shared.serveForTesting()
+    }
+    try? await Task.sleep(for: .seconds(2))
+    let state = await MainActor.run { (DeviceConnect.shared.listening, DeviceConnect.shared.port, DeviceConnect.shared.deviceId) }
+    print("listening: \(state.0) port: \(state.1.map(String.init) ?? "-") id: \(state.2)")
+    fflush(stdout)
+    try? await Task.sleep(for: .seconds(seconds))
+    await MainActor.run { DeviceConnect.shared.shutdown() }
+    print("stopped")
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--playnexttest") {
+    await PlayNextTest.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--exportifytest") {
+    await ExportifyTest.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--videomixtest") {
+    await VideoMixTest.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--sqtest") {
+    await SQTest.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--sqnettest") {
+    await SQTest.network()
+    exit(0)
+}
+// `--sqjoin address port`: joins a shared queue from this process and reports what happens.
+if let flag = CommandLine.arguments.firstIndex(of: "--sqjoin"), CommandLine.arguments.count > flag + 2 {
+    let address = CommandLine.arguments[flag + 1], port = UInt16(CommandLine.arguments[flag + 2]) ?? 0
+    await MainActor.run {
+        Keychain.service = "Metrolist.sqjoin.\(UUID().uuidString)"
+        SharedQueueClient.shared.log = { print("  session:", $0) }
+        SharedQueueClient.shared.join(address: address, port: port)
+    }
+    for _ in 0 ..< 16 {
+        try? await Task.sleep(for: .milliseconds(500))
+        print(await MainActor.run { "\(SharedQueueClient.shared.phase)" })
+    }
+    exit(0)
+}
+if CommandLine.arguments.contains("--sqmixtest") {
+    await SQTest.mixTest()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--dctest") {
+    await DCTest.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--blocktest") {
+    await BlockTest.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--scrobbletest") {
+    await ScrobbleTest.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--soundtest") {
+    SoundTest.run()
     exit(0)
 }
 

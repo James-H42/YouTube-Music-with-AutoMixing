@@ -6,6 +6,11 @@ struct SettingsView: View {
         TabView {
             Tab("General", systemImage: "gearshape") { GeneralSettings() }
             Tab("Playback", systemImage: "play.circle") { PlaybackSettings() }
+            Tab("Sound", systemImage: "slider.vertical.3") { SoundSettings() }
+            Tab("Lyrics", systemImage: "quote.bubble") { LyricsSettings() }
+            Tab("Devices", systemImage: "iphone.and.arrow.forward") { DevicesSettings() }
+            Tab("Content", systemImage: "eye.slash") { ContentSettings() }
+            Tab("Integrations", systemImage: "point.3.connected.trianglepath.dotted") { IntegrationsSettings() }
             Tab("Storage", systemImage: "internaldrive") { StorageSettings() }
             Tab("Account", systemImage: "person.crop.circle") { AccountSettings() }
         }
@@ -14,7 +19,7 @@ struct SettingsView: View {
     }
 }
 
-private struct GeneralSettings: View {
+struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -30,7 +35,7 @@ private struct GeneralSettings: View {
     }
 }
 
-private struct PlaybackSettings: View {
+struct PlaybackSettings: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -40,7 +45,6 @@ private struct PlaybackSettings: View {
                 ForEach(AudioQuality.allCases) { Text($0.title).tag($0) }
             }
             Toggle("Prefer audio versions over music videos", isOn: $settings.preferAudioVersions)
-            Toggle("Normalise loudness", isOn: $settings.normalizeVolume)
             Toggle("Show romanised lyrics for non-Latin scripts", isOn: $settings.showRomanization)
             Toggle("Autoplay similar songs when the queue ends", isOn: $settings.autoplay)
             Section("AutoMix") {
@@ -73,6 +77,176 @@ private struct PlaybackSettings: View {
             Text("Quality and normalisation changes apply from the next song. Songs already downloaded keep the quality they were saved at.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct SoundSettings: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+    @Bindable private var eq = MasterEQ.shared
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section("Equalizer") {
+                Toggle("Use the equalizer", isOn: $eq.enabled)
+                LabeledContent("Profile", value: eq.profile.name)
+                Button("Open Equalizer…") { openWindow(id: "equalizer") }
+                Text("Applied to everything you hear, after AutoMix has mixed the songs, so transitions don't change.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Loudness") {
+                Toggle("Normalise loudness", isOn: $settings.normalizeVolume)
+                Picker("Target level", selection: $settings.normalizationLevel) {
+                    ForEach(NormalizationLevel.allCases) { Text($0.title).tag($0) }
+                }
+                .disabled(!settings.normalizeVolume)
+                Toggle("Raise quiet songs (up to +3 dB)", isOn: $settings.normalizationBoost)
+                    .disabled(!settings.normalizeVolume)
+                Text("By default loud songs are turned down to a common level and quiet ones are left alone. Louder targets and boosting switch on a limiter so the result can't clip. Changes apply from the next song.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct LyricsSettings: View {
+    @ViewState private var order = LyricsPreferences.order
+    @ViewState private var disabled = LyricsPreferences.disabled
+    @ViewState private var wordSynced = LyricsPreferences.preferWordSynced
+
+    var body: some View {
+        Form {
+            Section("Sources, in the order they are asked") {
+                List {
+                    ForEach(order) { source in
+                        HStack {
+                            Toggle(source.title, isOn: Binding(
+                                get: { !disabled.contains(source) },
+                                set: { on in
+                                    if on { disabled.remove(source) } else { disabled.insert(source) }
+                                    LyricsPreferences.disabled = disabled
+                                }
+                            ))
+                            Spacer()
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                        }
+                    }
+                    .onMove { source, destination in
+                        order.move(fromOffsets: source, toOffset: destination)
+                        LyricsPreferences.order = order
+                    }
+                }
+                .frame(height: 170)
+                Text("Drag to reorder. The first source that has timed lyrics wins; plain lyrics are only used when no source has timing. Songs no source knows are asked about again after a week.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Prefer word-synced lyrics", isOn: Binding(get: { wordSynced }, set: { wordSynced = $0; LyricsPreferences.preferWordSynced = $0 }))
+                Text("Keeps asking further sources when the first only has line timing. Word timing lets AutoMix hand over between songs more precisely. Search results and edits are chosen from the lyrics menu next to the lyrics.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct ContentSettings: View {
+    @Bindable private var blocked = BlockedContent.shared
+
+    var body: some View {
+        Form {
+            Section("AI-generated artists") {
+                Toggle("Block AI-generated artists", isOn: $blocked.blockAIArtists)
+                if blocked.blockAIArtists {
+                    LabeledContent("Blocklist", value: blocked.aiListIsLoaded ? "\(blocked.aiCount) entries" : (blocked.aiRefreshing ? "Downloading…" : "Not downloaded"))
+                    if let updated = blocked.aiUpdated { LabeledContent("Updated", value: updated.formatted(date: .abbreviated, time: .shortened)) }
+                    if let message = blocked.aiMessage { Text(message).foregroundStyle(.orange) }
+                    Button("Update Now") { Task { await blocked.refreshAIList(force: true) } }.disabled(blocked.aiRefreshing)
+                }
+                Text("Uses the community AiSList (github.com/Override92/AiSList), downloaded over HTTPS and refreshed weekly. Nothing about you is sent. Blocked artists are kept out of Autoplay, search and Home; songs you saved yourself are not touched.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Hidden artists") {
+                if blocked.artists.isEmpty {
+                    Text("None. Use “Hide This Artist” in a song's or artist's context menu.").foregroundStyle(.secondary)
+                }
+                ForEach(blocked.artists) { artist in
+                    HStack {
+                        Text(artist.name)
+                        Spacer()
+                        Button("Unhide") { blocked.unhide(artist) }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct IntegrationsSettings: View {
+    @Bindable private var scrobbler = Scrobbler.shared
+    @ViewState private var apiKey = ""
+    @ViewState private var secret = ""
+    @ViewState private var token = ""
+
+    var body: some View {
+        Form {
+            Section("Last.fm") {
+                if scrobbler.isLastFmSignedIn {
+                    LabeledContent("Signed in as", value: scrobbler.lastFmUser ?? "")
+                    Toggle("Scrobble to Last.fm", isOn: $scrobbler.lastFmEnabled)
+                    if scrobbler.needsSignIn.contains("lastfm") { Text("Last.fm no longer accepts this sign-in.").foregroundStyle(.red) }
+                    Button("Sign Out") { scrobbler.signOutLastFm() }
+                } else {
+                    if !scrobbler.hasLastFmKeys {
+                        SecureField("API key", text: $apiKey)
+                        SecureField("Shared secret", text: $secret)
+                        Button("Save Keys") { scrobbler.saveLastFmKeys(key: apiKey, secret: secret); apiKey = ""; secret = "" }
+                            .disabled(apiKey.isEmpty || secret.isEmpty)
+                        Text("Last.fm needs an API account for each app. Create one for free at last.fm/api/account/create, then paste its key and shared secret here. They are kept in your Keychain.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else if scrobbler.pendingToken == nil {
+                        Button("Sign In…") {
+                            Task { if let url = await scrobbler.beginLastFmSignIn() { NSWorkspace.shared.open(url) } }
+                        }
+                    } else {
+                        Text("Approve Metrolist in your browser, then come back and press Finish.").font(.callout)
+                        Button("Finish Signing In") { Task { await scrobbler.finishLastFmSignIn() } }
+                    }
+                }
+            }
+            Section("ListenBrainz") {
+                if scrobbler.isListenBrainzSignedIn {
+                    LabeledContent("Signed in as", value: scrobbler.listenBrainzUser ?? "")
+                    Toggle("Scrobble to ListenBrainz", isOn: $scrobbler.listenBrainzEnabled)
+                    if scrobbler.needsSignIn.contains("listenbrainz") { Text("ListenBrainz no longer accepts this token.").foregroundStyle(.red) }
+                    Button("Sign Out") { scrobbler.signOutListenBrainz() }
+                } else {
+                    SecureField("User token", text: $token)
+                    Button("Sign In") { Task { await scrobbler.signInListenBrainz(token: token); token = "" } }
+                        .disabled(token.isEmpty)
+                    Text("Copy your user token from listenbrainz.org/settings. It is kept in your Keychain.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            Section("Waiting to be sent") {
+                LabeledContent("Listens queued", value: "\(scrobbler.queued)")
+                HStack {
+                    Button("Send Now") { scrobbler.flush() }.disabled(scrobbler.queued == 0)
+                    Button("Clear Queue", role: .destructive) { scrobbler.clearQueue() }.disabled(scrobbler.queued == 0)
+                }
+                Text("A song counts as played after half of it, or four minutes. With AutoMix on, \u{201C}now playing\u{201D} is sent at the hand-over, half-way through the transition. Listens made offline are sent when the connection returns. Only the title, artist, album and length are sent.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if let message = scrobbler.message { Text(message).foregroundStyle(.orange) }
         }
         .formStyle(.grouped)
     }

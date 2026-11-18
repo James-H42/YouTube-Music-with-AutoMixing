@@ -26,6 +26,8 @@ struct Lyrics: Codable {
     var lines: [LyricLine]
     /// User adjustment in seconds; positive values make lyrics appear later.
     var offset: Double = 0
+    /// True for lyrics the listener edited; they are kept when providers are searched again.
+    var userEdited: Bool?
 }
 
 enum LyricsTime {
@@ -235,5 +237,21 @@ enum LRCParser {
         }
         let text = words.map(\.text).joined().trimmingCharacters(in: .whitespaces)
         return (text, words)
+    }
+}
+
+/// Writes lines back as LRC, with `<mm:ss.xx>` word tags where the line has word timing, so an
+/// edited line keeps what the provider knew.
+enum LRCWriter {
+    static func stamp(_ seconds: Double) -> String {
+        let hundredths = Int((max(0, seconds) * 100).rounded())
+        return String(format: "%02d:%02d.%02d", hundredths / 6000, (hundredths / 100) % 60, hundredths % 100)
+    }
+
+    static func write(_ lines: [LyricLine]) -> String {
+        lines.map { line in
+            let body = line.words.isEmpty ? line.text : line.words.map { "<\(stamp($0.start))>\($0.text)" }.joined()
+            return "[\(stamp(line.start))]\(body)"
+        }.joined(separator: "\n")
     }
 }

@@ -88,6 +88,11 @@ final class MixEngine: @unchecked Sendable {
         set { decks.forEach { $0.volume = newValue } }
     }
 
+    /// Plays both decks through one output (nil: the system's default).
+    func setOutputDevice(_ id: UInt32?) {
+        decks.forEach { $0.setOutputDevice(id) }
+    }
+
     /// Positions of both decks, for tests that measure beat alignment.
     var deckTimes: (Double, Double) { (decks[0].preciseTime, decks[1].preciseTime) }
     var deckLevels: (Float, Float) { (decks[0].meter, decks[1].meter) }
