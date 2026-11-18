@@ -8,10 +8,14 @@ final class NetworkStatus: @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let lock = NSLock()
     private var online = true
+    /// Called when the connection comes back after being lost.
+    var onReconnect: (() -> Void)?
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
-            self?.lock.withLock { self?.online = path.status == .satisfied }
+            let now = path.status == .satisfied
+            let was = self?.lock.withLock { () -> Bool in let before = self?.online ?? true; self?.online = now; return before } ?? true
+            if now, !was { self?.onReconnect?() }
         }
         monitor.start(queue: DispatchQueue(label: "metrolist.network"))
     }

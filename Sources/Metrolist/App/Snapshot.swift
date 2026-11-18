@@ -61,6 +61,87 @@ enum Snapshot {
             await diagnose(model: model, size: main)
             return
         }
+        if CommandLine.arguments.contains("--sqscreens") {
+            // `--snapshot dir --sqscreens`: the shared-queue screens, with a guest's song in the queue.
+            Keychain.service = "Metrolist.sqscreens.\(UUID().uuidString)"
+            let size = CGSize(width: 560, height: 640)
+            await capture("sharedqueue-start", size: size, settle: 1) { SharedQueueHostView() }
+            SharedQueue.shared.start()
+            await wait(2)
+            await capture("sharedqueue-running", size: CGSize(width: 560, height: 820), settle: 1) { SharedQueueHostView() }
+            await capture("sharedqueue-join", size: size, settle: 3) { SharedQueueJoinView() }
+            await capture("sharedqueue-request", size: CGSize(width: 420, height: 380), settle: 1) {
+                PairingRequestSheet(request: DCPairingRequest(requestId: "x", peerId: "phone", peerName: "Phone", sas: "418203", expires: Date().addingTimeInterval(300)), endpoint: .guests)
+            }
+            model.settings.autoplay = false
+            model.player.applyRemoteQueue(["y32ejtuxSjM", "GTmbyuTKT_c"].map { model.library.song($0) ?? Song(id: $0, title: $0) }, index: 0, position: 0, playing: false, restart: true)
+            SharedQueue.shared.policy.record(guest: DeviceConnect.guests.peerKey("someone"), songIds: ["GTmbyuTKT_c"])
+            await capture("sharedqueue-queue", size: CGSize(width: 380, height: 300), settle: 2) { QueueView() }
+            model.sidebar = .sharedQueue
+            await capture("sharedqueue-main", size: main, settle: 3) { RootView() }
+            DeviceConnect.guests.shutdown()
+            return
+        }
+        if CommandLine.arguments.contains("--newscreens") {
+            // `--snapshot dir --newscreens [songId]`: every screen added by the v14 integration.
+            let settingsSize = CGSize(width: 580, height: 520)
+            await capture("settings-sound", size: settingsSize, settle: 1) { SoundSettings() }
+            await capture("settings-lyrics", size: settingsSize, settle: 1) { LyricsSettings() }
+            await capture("settings-content", size: settingsSize, settle: 1) { ContentSettings() }
+            await capture("settings-integrations", size: CGSize(width: 580, height: 640), settle: 1) { IntegrationsSettings() }
+            await capture("settings-devices", size: CGSize(width: 580, height: 560), settle: 1) { DevicesSettings() }
+            await capture("pairing-request", size: CGSize(width: 420, height: 340), settle: 1) {
+                PairingRequestSheet(request: DCPairingRequest(requestId: "x", peerId: "phone", peerName: "Phone", sas: "062889", expires: Date().addingTimeInterval(300)))
+            }
+            MasterEQ.shared.choose(EQProfile.presets[3])
+            MasterEQ.shared.enabled = true
+            await capture("equalizer", size: CGSize(width: 680, height: 600), settle: 1) { EqualizerView() }
+            MasterEQ.shared.enabled = false
+            MasterEQ.shared.choose(.flat)
+            await capture("playlist-import", size: CGSize(width: 620, height: 520), settle: 1) { PlaylistImportSheet() }
+            if let id = CommandLine.arguments.drop(while: { $0 != "--newscreens" }).dropFirst().first, !id.hasPrefix("--") {
+                model.settings.autoplay = false
+                model.player.play(song: model.library.song(id) ?? Song(id: id, title: id))
+                for _ in 0 ..< 100 where model.player.lyrics == nil { await wait(0.1) }
+                model.player.pause()
+                await capture("lyrics-search", size: CGSize(width: 560, height: 460), settle: 6) { LyricsSearchSheet() }
+                await capture("lyrics-editor", size: CGSize(width: 640, height: 560), settle: 2) { LyricsEditorSheet() }
+                await capture("player-bar", size: CGSize(width: 1180, height: 120), settle: 1) { PlayerBar() }
+            }
+            return
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "--lyricsreplan") {
+            // `--snapshot dir --lyricsreplan idA idB`: edits the first song's lyrics and checks that
+            // the pair is planned again, while a transition saved by hand stays as it was.
+            let ids = CommandLine.arguments.dropFirst(flag + 1).filter { !$0.hasPrefix("--") }.prefix(2)
+            model.settings.autoMix = true
+            model.settings.autoplay = false
+            let player = model.player
+            player.play(ids.map { model.library.song($0) ?? Song(id: $0, title: $0) })
+            for _ in 0 ..< 600 where player.nextMixCandidates.isEmpty { await wait(0.1) }
+            player.pause()
+            let before = player.nextMixCandidates
+            print("before: \(before.count) proposals, best \(before.first?.id.uuidString.prefix(8) ?? "-") leaving A at \(before.first.map { String(format: "%.1f", $0.outStart) } ?? "-") s, lyrics: \(player.lyrics?.provider ?? "none") \(player.lyrics?.lines.count ?? 0) lines")
+            var edited = player.lyrics ?? Lyrics(provider: "User", isSynced: true, lines: [])
+            // Singing only in the first thirty seconds: the planner has to look elsewhere for vocals.
+            edited.lines = edited.lines.filter { $0.start < 30 }
+            if edited.lines.isEmpty { edited.lines = [LyricLine(id: 0, start: 1, end: 5, text: "test line")] }
+            edited.isSynced = true
+            player.saveEditedLyrics(edited)
+            for _ in 0 ..< 600 where player.nextMixCandidates.first?.id == before.first?.id || player.nextMixCandidates.isEmpty { await wait(0.1) }
+            let after = player.nextMixCandidates
+            print("after:  \(after.count) proposals, best \(after.first?.id.uuidString.prefix(8) ?? "-") leaving A at \(after.first.map { String(format: "%.1f", $0.outStart) } ?? "-") s, lyrics: \(player.lyrics?.provider ?? "none") \(player.lyrics?.lines.count ?? 0) lines")
+            print(after.first?.id != before.first?.id ? "PASS: the pair was planned again after the edit" : "FAIL: the plan was not replaced")
+            // A saved transition is never touched by a lyrics change.
+            player.applyMixPreset(.fade)
+            player.keepAuditionedMix()
+            let kept = player.nextMixPlan?.signature
+            player.discardEditedLyrics()
+            await wait(8)
+            print(player.nextMixPlan?.signature == kept ? "PASS: the transition saved by hand was untouched" : "FAIL: the saved transition changed")
+            print("user lyrics removed:", !(await LyricsService.shared.hasUserCopy(ids.first ?? "")))
+            return
+        }
         if let flag = CommandLine.arguments.firstIndex(of: "--mixeditor") {
             // `--snapshot dir --mixeditor idA idB [--preset name]`: the transition editor for a pair.
             let ids = CommandLine.arguments.dropFirst(flag + 1).filter { !$0.hasPrefix("--") }.prefix(2)

@@ -158,6 +158,8 @@ final class AudioEngine: @unchecked Sendable {
     /// The deck's fader. A player node's own volume only works when it feeds a mixer directly.
     private let fader = AVAudioMixerNode()
     private let delay = AVAudioUnitDelay()
+    /// Equaliser and limiter between the main mixer and the output, after the deck's own chain.
+    private let masterEQ = MasterEQUnit()
     private let queue = DispatchQueue(label: "metrolist.audio-engine", qos: .userInitiated)
 
     // Confined to `queue`.
@@ -176,6 +178,8 @@ final class AudioEngine: @unchecked Sendable {
     private var wantsStretch = false
     private var connectedStretch = false
     private var startHostTime: UInt64?
+    /// The output to play through; nil follows the system's default.
+    private var outputDevice: AudioDeviceID?
     /// Section being repeated: reading jumps back to `start` each time it reaches `end`.
     private var loop: (start: Double, end: Double)?
     private var meterInstalled = false
@@ -208,6 +212,16 @@ final class AudioEngine: @unchecked Sendable {
         engine.attach(timePitch)
         engine.attach(fader)
         engine.attach(delay)
+        masterEQ.install(in: engine)
+        // The equaliser's graph changes happen on this engine's own queue, like its others.
+        let register: @Sendable () -> Void = { [weak self] in
+            MainActor.assumeIsolated {
+                MasterEQ.shared.register { profile, enabled, limit in
+                    self?.queue.async { self?.masterEQ.apply(profile, enabled: enabled, limit: limit) }
+                }
+            }
+        }
+        if Thread.isMainThread { register() } else { DispatchQueue.main.async { register() } }
         // A DJ mixer's three-band EQ, plus a high-pass that thins a track out as it leaves.
         equalizer.bands[0].filterType = .lowShelf
         equalizer.bands[0].frequency = 180
@@ -692,6 +706,28 @@ final class AudioEngine: @unchecked Sendable {
         }
     }
 
+    /// Plays through another output (an AirPlay speaker, headphones, a display), or back through
+    /// the system's default with nil. What is playing carries on from where it was.
+    func setOutputDevice(_ id: AudioDeviceID?) {
+        queue.async { [self] in
+            outputDevice = id
+            let position = currentTime
+            guard applyOutputDevice() else { return }
+            masterEQ.refreshFormat()
+            // The engine rebuilds its output on the new device; schedule again from here.
+            if media != nil, reader != nil { performSeek(position) }
+        }
+    }
+
+    /// Points the engine's output at the chosen device. Returns true when that changed it.
+    private func applyOutputDevice() -> Bool {
+        guard let target = outputDevice ?? OutputDevices.defaultOutput() else { return false }
+        let unit = engine.outputNode.auAudioUnit
+        guard unit.deviceID != target else { return false }
+        do { try unit.setDeviceID(target) } catch { return false }
+        return true
+    }
+
     private func startEngine() -> Bool {
         if !engine.isRunning {
             engine.prepare()
@@ -710,7 +746,7 @@ final class AudioEngine: @unchecked Sendable {
     /// Loudness normalisation: attenuate tracks mastered louder than YouTube's reference level.
     private func gain(for media: OpenedMedia?) -> Float {
         guard normalize, let loudness = media?.loudnessDb else { return 1 }
-        return Float(min(1, pow(10, -loudness / 20)))
+        return Normalization.gain(loudnessDb: loudness)
     }
 
     private func captureTime() {
@@ -719,6 +755,7 @@ final class AudioEngine: @unchecked Sendable {
 
     private func handleConfigurationChange() {
         // The output device changed; the engine has stopped and dropped what was scheduled.
+        masterEQ.refreshFormat()
         guard media != nil, reader != nil else { return }
         let position = currentTime
         performSeek(position)

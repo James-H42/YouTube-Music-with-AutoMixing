@@ -69,6 +69,12 @@ private struct QueueRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let guest = SharedQueue.shared.addedByName(song.id) {
+                    Label("Added by \(guest)", systemImage: "person.2.wave.2")
+                        .font(.caption2)
+                        .foregroundStyle(.tint)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if hovering, !isCurrent {
@@ -138,12 +144,17 @@ struct LyricsFooter: View {
                     }
                     .help("Show lyrics later")
                 }
-                Button {
-                    model.player.reloadLyrics()
+                Menu {
+                    Button("Search Lyrics…", systemImage: "magnifyingglass") { model.showLyricsSearch = true }
+                    Button("Edit Lyrics and Timing…", systemImage: "pencil") { model.showLyricsEditor = true }
+                    Divider()
+                    Button("Search Again", systemImage: "arrow.clockwise") { model.player.reloadLyrics() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "ellipsis.circle")
                 }
-                .help("Search for lyrics again")
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Choose another lyrics source, or edit these lyrics")
             }
             .buttonStyle(.borderless)
             .controlSize(.small)

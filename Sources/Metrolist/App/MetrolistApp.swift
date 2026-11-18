@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        MainActor.assumeIsolated { DeviceConnect.shared.restoreIfEnabled() }
 
         // Space toggles playback unless the user is typing.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -38,6 +39,22 @@ struct MetrolistApp: App {
         .commands {
             PlaybackCommands(model: model)
         }
+
+        Window("Equalizer", id: "equalizer") {
+            EqualizerView()
+                .environment(model)
+        }
+        .defaultSize(width: 680, height: 600)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
+        Window("Shared Queue", id: "sharedqueue") {
+            SharedQueueView()
+                .environment(model)
+        }
+        .defaultSize(width: 560, height: 640)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         Window("Mini Player", id: "mini") {
             MiniPlayerView()
@@ -75,6 +92,13 @@ struct PlaybackCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {}
+        CommandGroup(after: .newItem) {
+            Button("Import Playlist…") { model.showPlaylistImport = true }
+            Button("Import Backup from Another App…") { model.importForeignBackup() }
+            Divider()
+            Button("Back Up Library…") { model.backUpLibrary() }
+            Button("Restore from Backup…") { model.restoreLibrary() }
+        }
         CommandMenu("Playback") {
             Button(model.player.isPlaying ? "Pause" : "Play") { model.player.togglePlayPause() }
                 .disabled(model.player.currentSong == nil)
@@ -122,6 +146,10 @@ struct PlaybackCommands: Commands {
             Divider()
         }
         CommandGroup(after: .windowArrangement) {
+            Button("Equalizer") { openWindow(id: "equalizer") }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+            Button("Shared Queue") { openWindow(id: "sharedqueue") }
+                .keyboardShortcut("j", modifiers: [.command, .shift])
             Button("Switch to Mini Player") {
                 openWindow(id: "mini")
                 dismissWindow(id: "main")

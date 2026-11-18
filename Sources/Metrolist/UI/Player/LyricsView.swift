@@ -182,6 +182,8 @@ struct LyricsView: View {
                 Label("No Lyrics Found", systemImage: "quote.bubble")
             } actions: {
                 Button("Search Again") { player.reloadLyrics() }
+                Button("Choose a Source…") { model.showLyricsSearch = true }
+                Button("Write Lyrics…") { model.showLyricsEditor = true }
             }
         }
     }

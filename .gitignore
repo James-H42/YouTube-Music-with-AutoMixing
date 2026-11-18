@@ -13,3 +13,9 @@ genius-token
 mixes.json
 samples.json
 *.webm
+*.md
+
+# Local working files
+.source-backup-*
+COMMIT_MESSAGE.txt
+CLAUDE.md

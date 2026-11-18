@@ -22,6 +22,8 @@ enum AppPaths {
     /// Audio files, both automatically cached and explicitly downloaded.
     static let media = directory(root.appendingPathComponent("Media", isDirectory: true))
     static let artwork = directory(root.appendingPathComponent("Artwork", isDirectory: true))
+    /// Copies of the data that a restore replaced.
+    static let backups = directory(root.appendingPathComponent("Backups", isDirectory: true))
     static let lyrics = directory(root.appendingPathComponent("Lyrics", isDirectory: true))
     /// Cached tempo, beat, key and energy analysis used by AutoMix.
     static let analysis = directory(root.appendingPathComponent("Analysis", isDirectory: true))
@@ -31,6 +33,13 @@ enum AppPaths {
     static let playerState = root.appendingPathComponent("player.json")
     /// Transitions edited by hand, by pair of songs.
     static let mixes = root.appendingPathComponent("mixes.json")
+    /// Artists the listener hid, and the cached community list of AI-generated artists.
+    static let blocked = root.appendingPathComponent("blocked.json")
+    static let aiBlocklist = root.appendingPathComponent("ai-blocklist.txt")
+    /// Plays waiting to be sent to Last.fm and ListenBrainz (track data only).
+    static let scrobbles = root.appendingPathComponent("scrobbles.json")
+    /// The equaliser's active profile and saved profiles.
+    static let eq = root.appendingPathComponent("eq.json")
 
     private static func directory(_ url: URL) -> URL {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

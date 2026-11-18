@@ -137,7 +137,7 @@ struct TransitionRow: View {
                 } else if player.isPreparingMix {
                     Text("Analysing the next track…").font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("Plays straight through (same album)").font(.caption).foregroundStyle(.secondary)
+                    Text(player.mixSkipReason).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 if player.mixPair != nil {

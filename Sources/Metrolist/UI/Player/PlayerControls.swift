@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 /// Seek slider with elapsed and total time.
@@ -264,6 +265,7 @@ struct PlayerBar: View {
             if density != .minimal {
             HStack(spacing: 0) {
                 if density == .full { VolumeControl().padding(.trailing, 6) }
+                OutputButton()
                 AutoMixButton()
                 Button {
                     model.toggleInspector(.lyrics)
@@ -272,6 +274,16 @@ struct PlayerBar: View {
                         .foregroundStyle(model.showInspector && model.inspectorTab == .lyrics ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 }
                 .help("Lyrics")
+                Button {
+                    model.path = []
+                    model.sidebar = .sharedQueue
+                } label: {
+                    // Lit while this Mac shares its queue or has joined someone else's.
+                    Image(systemName: "person.2.wave.2")
+                        .foregroundStyle(DeviceConnect.guests.enabled || SharedQueueClient.shared.joined ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                }
+                .help(DeviceConnect.guests.enabled ? "Shared Queue: on, \(DeviceConnect.guests.connected.count) guest\(DeviceConnect.guests.connected.count == 1 ? "" : "s") connected"
+                      : SharedQueueClient.shared.joined ? "Shared Queue: joined \(SharedQueueClient.shared.hostName)" : "Shared Queue")
                 Button {
                     model.toggleInspector(.queue)
                 } label: {
@@ -298,4 +310,66 @@ struct PlayerBar: View {
         .padding(.vertical, 8)
         .glassEffect(.regular, in: .rect(cornerRadius: 22))
     }
+}
+
+/// Chooses where sound comes out: any output Core Audio lists, including AirPlay speakers once
+/// macOS has connected them. The mix is still made by this app, so AutoMix works on any of them.
+struct OutputButton: View {
+    @Bindable private var outputs = OutputDevices.shared
+    @ViewState private var showing = false
+
+    var body: some View {
+        Button {
+            outputs.refresh()
+            showing.toggle()
+        } label: {
+            Image(systemName: outputs.selected?.symbol ?? "hifispeaker.2")
+                .foregroundStyle(outputs.selected == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+        }
+        .help(outputs.selected.map { "Playing through \($0.name)" } ?? "Choose where sound plays")
+        .popover(isPresented: $showing, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Play through").font(.headline).padding(.bottom, 4)
+                row(title: "System Default", symbol: "macbook.and.iphone", chosen: outputs.selectedUID == nil) { outputs.select(nil) }
+                ForEach(outputs.devices) { device in
+                    row(title: device.name, symbol: device.symbol, chosen: device.uid == outputs.selectedUID) { outputs.select(device) }
+                }
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("AirPlay speakers and TVs")
+                    Spacer()
+                    RoutePicker().frame(width: 28, height: 24)
+                }
+                Text("Pick one with the AirPlay button; once macOS has connected, it appears in the list above.")
+                    .font(.caption).foregroundStyle(.secondary).frame(width: 260, alignment: .leading)
+            }
+            .padding(14)
+            .frame(minWidth: 280)
+        }
+    }
+
+    private func row(title: String, symbol: String, chosen: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: symbol).frame(width: 22)
+                Text(title).lineLimit(1)
+                Spacer()
+                if chosen { Image(systemName: "checkmark") }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+    }
+}
+
+/// The system's AirPlay picker.
+struct RoutePicker: NSViewRepresentable {
+    func makeNSView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.isRoutePickerButtonBordered = false
+        return view
+    }
+
+    func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}
 }
