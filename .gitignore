@@ -19,3 +19,6 @@ samples.json
 .source-backup-*
 COMMIT_MESSAGE.txt
 CLAUDE.md
+
+# Must Include
+!README.md
