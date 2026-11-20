@@ -7,7 +7,7 @@ enum AudioQuality: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .high: "High (Opus ~160 kbps)"
+        case .high: "Highest available (Opus, up to 256 kbps)"
         case .low: "Data saver (Opus ~50 kbps)"
         }
     }
@@ -269,23 +269,97 @@ actor StreamResolver {
         )
     }
 
-    /// Picks the best audio-only format: the original-language, non-DRC track, preferring Opus
-    /// (the highest quality available without Premium) and falling back to AAC.
+    /// Picks the best audio-only format, as Metrolist's "High" does, with one difference:
+    ///
+    /// - Only the original-language track (YouTube's `acont=original` tag, else the default
+    ///   track), never a dub, and never the dynamic-range-compressed copy.
+    /// - The highest bitrate wins: Opus 774 (~256 kbps) for accounts with Premium, Opus 251
+    ///   (~160 kbps) otherwise.
+    /// - Unlike Metrolist, Opus is kept over AAC unless the AAC stream has well over 1.5×
+    ///   the bitrate. Opus at 160 kbps already matches AAC at 256 kbps in listening tests,
+    ///   and only Opus (WebM) can play while still downloading, which gapless playback and
+    ///   AutoMix rely on; an AAC file has to finish downloading first.
     static func select(_ formats: [JSON], quality: AudioQuality) -> JSON? {
         var pool = formats
-        if pool.contains(where: { $0["audioTrack"].exists }) {
-            let originals = pool.filter { $0["audioTrack"]["audioIsDefault"].bool == true }
-            if !originals.isEmpty { pool = originals }
+        let originals = pool.filter { audioContent($0) == "original" }
+        if !originals.isEmpty {
+            pool = originals
+        } else if pool.contains(where: { $0["audioTrack"].exists }) {
+            let defaults = pool.filter { $0["audioTrack"]["audioIsDefault"].bool == true }
+            if !defaults.isEmpty { pool = defaults }
         }
-        let withoutDRC = pool.filter { $0["isDrc"].bool != true }
+        let withoutDRC = pool.filter { $0["isDrc"].bool != true && audioContent($0) != "drc" }
         if !withoutDRC.isEmpty { pool = withoutDRC }
 
-        let opus = pool.filter { ($0["mimeType"].string ?? "").contains("opus") }
-        let candidates = opus.isEmpty ? pool : opus
         let bitrate: (JSON) -> Int = { $0["bitrate"].int ?? 0 }
+        let opus = pool.filter { ($0["mimeType"].string ?? "").contains("opus") }
+        let others = pool.filter { !($0["mimeType"].string ?? "").contains("opus") }
         switch quality {
-        case .high: return candidates.max { bitrate($0) < bitrate($1) }
-        case .low: return candidates.min { bitrate($0) < bitrate($1) }
+        case .high:
+            let bestOpus = opus.max { bitrate($0) < bitrate($1) }
+            let bestOther = others.max { bitrate($0) < bitrate($1) }
+            guard let bestOpus else { return bestOther }
+            if let bestOther, Double(bitrate(bestOther)) > Double(bitrate(bestOpus)) * 1.6 { return bestOther }
+            return bestOpus
+        case .low:
+            return (opus.isEmpty ? pool : opus).min { bitrate($0) < bitrate($1) }
         }
+    }
+
+    /// YouTube's `acont` tag ("original", "dubbed", "drc"…) from a format's `xtags`, a
+    /// base64url protobuf of repeated { 1: key, 2: value } entries.
+    static func audioContent(_ format: JSON) -> String? {
+        guard var text = format["xtags"].string, text.count <= 1024 else { return nil }
+        text = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while text.count % 4 != 0 { text += "=" }
+        guard let data = Data(base64Encoded: text) else { return nil }
+        let bytes = [UInt8](data)
+        var index = 0
+        func varint() -> Int? {
+            var result = 0, shift = 0
+            while index < bytes.count {
+                let byte = bytes[index]; index += 1
+                result |= Int(byte & 0x7F) << shift
+                if byte & 0x80 == 0 { return result }
+                shift += 7
+                if shift > 28 { return nil }
+            }
+            return nil
+        }
+        while index < bytes.count {
+            guard let tag = varint(), tag & 7 == 2, let length = varint(), index + length <= bytes.count else { return nil }
+            let entry = Array(bytes[index ..< index + length])
+            index += length
+            guard tag >> 3 == 1 else { continue }
+            var key: String?, value: String?, position = 0
+            while position + 1 < entry.count {
+                let field = entry[position] >> 3, size = Int(entry[position + 1])
+                position += 2
+                guard position + size <= entry.count else { break }
+                let string = String(decoding: entry[position ..< position + size], as: UTF8.self)
+                if field == 1 { key = string } else if field == 2 { value = string }
+                position += size
+            }
+            if key == "acont" { return value }
+        }
+        return nil
+    }
+
+    /// Every audio format each playback identity is offered for a video, for `--qualitytest`.
+    func formatsReport(videoId: String) async -> [(client: String, formats: [JSON], error: String?)] {
+        var report: [(String, [JSON], String?)] = []
+        for client in YouTubeClient.playbackClients {
+            do {
+                var body: [String: Any] = ["videoId": videoId, "contentCheckOk": true, "racyCheckOk": true]
+                if !client.useMusicPlayerEndpoint { body["videoCheckOk"] = true }
+                let json = try await InnerTube.shared.post("player", client: client, body: body)
+                let status = json["playabilityStatus"]["status"].string ?? "?"
+                let formats = json["streamingData"]["adaptiveFormats"].array.filter { ($0["mimeType"].string ?? "").hasPrefix("audio/") }
+                report.append((client.id, formats, status == "OK" ? nil : (json["playabilityStatus"]["reason"].string ?? status)))
+            } catch {
+                report.append((client.id, [], "\(error)"))
+            }
+        }
+        return report
     }
 }

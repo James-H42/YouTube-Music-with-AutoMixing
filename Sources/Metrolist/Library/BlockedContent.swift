@@ -93,7 +93,7 @@ final class BlockedContent {
     /// The list the AI-artist blocklist is read from: a public file on GitHub, fetched as data only.
     static let aiListAddress = URL(string: "https://raw.githubusercontent.com/Override92/AiSList/main/AiSList/aislist_blocklist.txt")!
     private static let maxListBytes = 8 * 1024 * 1024
-    private static let refreshInterval: TimeInterval = 7 * 24 * 3600
+    private static let refreshInterval: TimeInterval = 24 * 3600
     nonisolated(unsafe) static var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
@@ -156,7 +156,7 @@ final class BlockedContent {
         publish()
     }
 
-    /// Fetches the AI-artist list again when it's a week old (or `force`). The old list is kept
+    /// Fetches the AI-artist list again when it's a day old (or `force`), as Metrolist 14.0.1 does. The old list is kept
     /// if the download fails or isn't a plausible list.
     func refreshAIList(force: Bool = false) async {
         guard blockAIArtists, !aiRefreshing else { return }

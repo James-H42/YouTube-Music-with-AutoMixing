@@ -24,7 +24,7 @@ enum LibraryBackup {
     /// Preferences that go into a backup. Anything not listed is left out, and so is anything
     /// whose name suggests a credential.
     static let settingsKeys = [
-        "audioQuality", "preferAudioVersions", "normalizeVolume", "normalizationLevel", "normalizationBoost", "autoplay", "maxCacheGB",
+        "audioQuality", "preferAudioVersions", "showVideos", "videoQuality", "appleArtistImages", "animatedArtistArtwork", "animatedAlbumCovers", "hideOriginalLyrics", "discordPresence", "normalizeVolume", "normalizationLevel", "normalizationBoost", "autoplay", "maxCacheGB",
         "showMenuBarPlayer", "miniPlayerOnTop", "fullScreenLyrics", "showRomanization", "autoMix", "mixLength", "mixStyle", "mixKeyMatch",
         "mixSampleLookup", "mixOrdersQueue", "mixAlbums", "volume", "accountPlayback", "lyricsProviderOrder", "lyricsProvidersDisabled",
         "lyricsPreferWordSynced", "outputDeviceUID", "hideAIArtists",

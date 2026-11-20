@@ -158,7 +158,7 @@ struct SectionView: View {
                     ForEach(Array(songs.enumerated()), id: \.offset) { index, song in
                         SongRow(song: song, showAlbum: false) {
                             // A lone search/quick-pick result starts a radio; a real list plays in order.
-                            if songs.count <= 3 { model.player.play(song: song) } else { model.player.play(songs, startAt: index) }
+                            if songs.count <= 3 { model.player.play(song: song) } else { model.player.play(songs, startAt: index, chosen: true) }
                         }
                     }
                 }
@@ -324,23 +324,37 @@ struct PageHeader<Actions: View>: View {
     let subtitle: String
     var artists: [ArtistRef] = []
     var description: String?
+    /// Animated artwork played over the still one once it can be shown (album pages).
+    var motion: URL?
+    /// Song count and length ("12 songs, 48 min"), as Apple Music and Spotify show them.
+    var details: String?
     @ViewBuilder let actions: () -> Actions
+    @ViewState private var width: CGFloat = 900
 
+    /// Like Apple Music's and Spotify's album and playlist pages, the cover grows with the
+    /// window (from 170 to 320 points, about 30% of the page's width) and the title with it;
+    /// on a narrow page it goes, so the title and buttons keep their room.
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            layout(artSize: 200, titleSize: 34)
-            layout(artSize: 130, titleSize: 24)
-            layout(artSize: 0, titleSize: 22)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
+        let art: CGFloat = width < 480 ? 0 : min(320, max(170, ((width - 48) * 0.3).rounded()))
+        let titleSize: CGFloat = art >= 280 ? 44 : art >= 220 ? 38 : art > 0 ? 30 : 24
+        layout(artSize: art, titleSize: titleSize)
+            .padding(.horizontal, 24)
+            .padding(.top, 16)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
     private func layout(artSize: CGFloat, titleSize: CGFloat) -> some View {
-        HStack(alignment: .bottom, spacing: artSize > 150 ? 24 : 16) {
+        HStack(alignment: .bottom, spacing: artSize > 200 ? 28 : 18) {
             if artSize > 0 {
-                ArtworkView(url: artwork, size: artSize, cornerRadius: 12, circular: circular, pixelSize: 600)
-                    .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
+                ArtworkView(url: artwork, size: artSize, cornerRadius: artSize > 200 ? 14 : 12, circular: circular, pixelSize: 1000)
+                    .overlay {
+                        if let motion {
+                            LoopingVideoView(url: motion)
+                                .clipShape(RoundedRectangle(cornerRadius: artSize > 200 ? 14 : 12, style: .continuous))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.3), radius: 22, y: 10)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(kind.uppercased())
@@ -349,6 +363,7 @@ struct PageHeader<Actions: View>: View {
                 Text(title)
                     .font(.system(size: titleSize, weight: .bold))
                     .lineLimit(3)
+                    .minimumScaleFactor(0.7)
                     .textSelection(.enabled)
                 if !artists.isEmpty {
                     ArtistLinks(artists: artists)
@@ -360,12 +375,15 @@ struct PageHeader<Actions: View>: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                if let description, !description.isEmpty {
-                    Text(description)
+                // YouTube Music's own subtitle often has the count and length already.
+                let extra = description?.localizedCaseInsensitiveContains("song") == true ? nil : details
+                let line = [description, extra].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " • ")
+                if !line.isEmpty {
+                    Text(line)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
-                        .help(description)
+                        .help(line)
                 }
                 HStack(spacing: 10) {
                     actions()
@@ -433,4 +451,14 @@ struct CollectionActions: View {
         .disabled(songs.isEmpty)
         .help(allDownloaded ? "Remove Downloads" : "Download for Offline Listening")
     }
+}
+
+/// "12 songs, 48 min" or "34 songs, 1 hr 52 min", for page headers.
+func songSummary(_ songs: [Song]) -> String? {
+    guard !songs.isEmpty else { return nil }
+    let count = "\(songs.count) song\(songs.count == 1 ? "" : "s")"
+    let seconds = songs.reduce(0) { $0 + ($1.duration ?? 0) }
+    guard seconds > 0 else { return count }
+    let hours = seconds / 3600, minutes = (seconds % 3600 + 30) / 60
+    return count + ", " + (hours > 0 ? "\(hours) hr \(minutes) min" : "\(max(1, minutes)) min")
 }

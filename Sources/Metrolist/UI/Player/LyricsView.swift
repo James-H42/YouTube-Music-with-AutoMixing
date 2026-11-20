@@ -56,6 +56,9 @@ private struct LyricLineView: View, Equatable {
     let fontSize: CGFloat
     let synced: Bool
     var showRomanized = true
+    /// Show the romanised reading in place of the original script (no word-by-word fill then,
+    /// since the timing belongs to the original words).
+    var hideOriginal = false
 
     private var font: Font {
         .system(size: line.isBackground ? fontSize * 0.72 : fontSize, weight: .bold, design: .rounded)
@@ -75,8 +78,16 @@ private struct LyricLineView: View, Equatable {
 
     var body: some View {
         VStack(alignment: line.isSecondary ? .trailing : .leading, spacing: fontSize * 0.14) {
-            lineText
-            if showRomanized, let romanized = line.romanized {
+            if showRomanized, hideOriginal, let romanized = line.romanized {
+                Text(romanized)
+                    .font(font)
+                    .foregroundStyle(.primary.opacity(isActive ? 1 : idleOpacity))
+                    .multilineTextAlignment(line.isSecondary ? .trailing : .leading)
+                    .lineSpacing(4)
+            } else {
+                lineText
+            }
+            if showRomanized, !hideOriginal, let romanized = line.romanized {
                 Text(romanized)
                     .font(.system(size: max(12, fontSize * 0.58), weight: .medium, design: .rounded))
                     .foregroundStyle(.primary.opacity(isActive ? 0.8 : idleOpacity * 0.85))
@@ -153,10 +164,11 @@ struct LyricsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(lyrics.lines) { line in
-                            Text(line.text.isEmpty ? " " : line.text)
+                            let replaced = model.settings.showRomanization && model.settings.hideOriginalLyrics && line.romanized != nil
+                            Text(replaced ? line.romanized! : line.text.isEmpty ? " " : line.text)
                                 .font(.system(size: fontSize * 0.8, weight: .semibold, design: .rounded))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            if model.settings.showRomanization, let romanized = line.romanized {
+                            if model.settings.showRomanization, !replaced, let romanized = line.romanized {
                                 Text(romanized)
                                     .font(.system(size: max(12, fontSize * 0.52), weight: .medium, design: .rounded))
                                     .foregroundStyle(.secondary)
@@ -214,7 +226,8 @@ private struct SyncedLyricsView: View {
                                 time: isActive ? time : nil,
                                 fontSize: fontSize,
                                 synced: true,
-                                showRomanized: model.settings.showRomanization
+                                showRomanized: model.settings.showRomanization,
+                                hideOriginal: model.settings.hideOriginalLyrics
                             )
                             .equatable()
                             .id(line.id)

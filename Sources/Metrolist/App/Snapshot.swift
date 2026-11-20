@@ -82,6 +82,40 @@ enum Snapshot {
             DeviceConnect.guests.shutdown()
             return
         }
+        if CommandLine.arguments.contains("--nov19screens") {
+            // `--snapshot dir --nov19screens`: screens changed on 2026-11-19 (Apple Music artwork off).
+            model.settings.appleArtistImages = false
+            model.settings.animatedArtistArtwork = false
+            model.settings.animatedAlbumCovers = false
+            model.settings.preferAudioVersions = true
+            let artists = (try? await YTMusic.search(ProcessInfo.processInfo.environment["SNAP_ARTIST"] ?? "Kanye West", filter: .artists).sections.flatMap(\.items)) ?? []
+            if let artist = artists.compactMap({ if case .artist(let found) = $0 { found } else { nil } }).first {
+                if let page = try? await YTMusic.artist(artist.id) { print("banner:", page.artist.thumbnail ?? "none") }
+                await capture("artist-page", size: main, settle: 6) { NavigationStack { ArtistView(browseId: artist.id) } }
+            }
+            let albums = (try? await YTMusic.search("Currents Tame Impala", filter: .albums).sections.flatMap(\.items)) ?? []
+            if let album = albums.compactMap({ if case .album(let found) = $0 { found } else { nil } }).first {
+                await capture("album-page", size: main, settle: 6) { NavigationStack { AlbumView(browseId: album.id) } }
+            }
+            await capture("playlist-videos-swapped", size: main, settle: 8) { NavigationStack { PlaylistView(playlistId: "PLOhV0FrFphUdkuWPE2bzJEsGxXMRKVkoM") } }
+            let library = model.library
+            if library.playlists.isEmpty {
+                _ = library.createPlaylist(name: "Liked Songs - Spotify")
+                _ = library.createPlaylist(name: "Road trip")
+                library.mergeRemote(liked: nil, albums: nil, artists: nil, playlists: [PlaylistItem(id: "PLdemo", title: "From YouTube Music")])
+                library.moveSidebarPlaylists(from: IndexSet(integer: 2), to: 0)
+            }
+            await capture("sidebar-arranged", size: CGSize(width: 240, height: 560), settle: 1) { SidebarView() }
+            struct FilterDemo: View {
+                @State var text = "touch"
+                var body: some View { FilterField(text: $text, shown: 4, total: 312).padding(20) }
+            }
+            await capture("filter-count", size: CGSize(width: 520, height: 70), settle: 1) { FilterDemo() }
+            await capture("settings-general", size: CGSize(width: 580, height: 520), settle: 1) { GeneralSettings() }
+            await capture("settings-integrations-discord", size: CGSize(width: 580, height: 700), settle: 1) { IntegrationsSettings() }
+            return
+        }
+
         if CommandLine.arguments.contains("--newscreens") {
             // `--snapshot dir --newscreens [songId]`: every screen added by the v14 integration.
             let settingsSize = CGSize(width: 580, height: 520)

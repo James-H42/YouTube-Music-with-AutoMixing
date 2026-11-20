@@ -8,6 +8,11 @@ final class AppSettings {
     var audioQuality: AudioQuality { didSet { defaults.set(audioQuality.rawValue, forKey: "audioQuality") } }
     /// Swap music videos for their audio release whenever one exists.
     var preferAudioVersions: Bool { didSet { defaults.set(preferAudioVersions, forKey: "preferAudioVersions") } }
+    /// Show the picture of a music video or live performance in the full-screen player.
+    var showVideos: Bool { didSet { defaults.set(showVideos, forKey: "showVideos") } }
+    /// Picture height of music videos: 0 lets the player choose (Auto), otherwise a fixed
+    /// quality such as 1080 or 2160, or the nearest one below it that the video has.
+    var videoQuality: Int { didSet { defaults.set(videoQuality, forKey: "videoQuality") } }
     var normalizeVolume: Bool { didSet { defaults.set(normalizeVolume, forKey: "normalizeVolume") } }
     /// Keep playing similar music when the queue runs out.
     /// Where tracks are levelled to, and whether quiet ones may be raised (by up to 3 dB).
@@ -39,6 +44,16 @@ final class AppSettings {
     var volume: Double { didSet { defaults.set(volume, forKey: "volume") } }
     /// When YouTube refuses anonymous playback, ask for streams as the signed-in account.
     var accountPlayback: Bool { didSet { defaults.set(accountPlayback, forKey: "accountPlayback") } }
+    /// Artist pages use Apple Music's artist picture when one is found.
+    var appleArtistImages: Bool { didSet { defaults.set(appleArtistImages, forKey: "appleArtistImages") } }
+    /// Artist pages play Apple Music's animated artist picture when there is one.
+    var animatedArtistArtwork: Bool { didSet { defaults.set(animatedArtistArtwork, forKey: "animatedArtistArtwork") } }
+    /// Album pages play Apple Music's animated cover when there is one.
+    var animatedAlbumCovers: Bool { didSet { defaults.set(animatedAlbumCovers, forKey: "animatedAlbumCovers") } }
+    /// Shows romanised lyrics in place of the original script, rather than under it.
+    var hideOriginalLyrics: Bool { didSet { defaults.set(hideOriginalLyrics, forKey: "hideOriginalLyrics") } }
+    /// Shows the playing song as a Discord activity, through the Discord app on this Mac.
+    var discordPresence: Bool { didSet { defaults.set(discordPresence, forKey: "discordPresence"); DiscordPresence.shared.setEnabled(discordPresence) } }
 
     var mixOptions: MixOptions { MixOptions(length: mixLength, style: mixStyle, keyMatch: mixKeyMatch) }
 
@@ -47,6 +62,7 @@ final class AppSettings {
     init() {
         defaults.register(defaults: [
             "preferAudioVersions": true,
+            "showVideos": true,
             "normalizeVolume": true,
             "autoplay": true,
             "maxCacheGB": 2.0,
@@ -61,6 +77,8 @@ final class AppSettings {
         ])
         audioQuality = AudioQuality(rawValue: defaults.string(forKey: "audioQuality") ?? "") ?? .high
         preferAudioVersions = defaults.bool(forKey: "preferAudioVersions")
+        showVideos = defaults.bool(forKey: "showVideos")
+        videoQuality = defaults.integer(forKey: "videoQuality")
         normalizeVolume = defaults.bool(forKey: "normalizeVolume")
         autoplay = defaults.bool(forKey: "autoplay")
         normalizationLevel = NormalizationLevel(rawValue: defaults.string(forKey: "normalizationLevel") ?? "") ?? .normal
@@ -80,7 +98,14 @@ final class AppSettings {
         geniusToken = SampleDatabase.geniusToken ?? ""
         volume = defaults.double(forKey: "volume")
         accountPlayback = defaults.bool(forKey: "accountPlayback")
+        appleArtistImages = defaults.bool(forKey: "appleArtistImages")
+        animatedArtistArtwork = defaults.bool(forKey: "animatedArtistArtwork")
+        animatedAlbumCovers = defaults.bool(forKey: "animatedAlbumCovers")
+        hideOriginalLyrics = defaults.bool(forKey: "hideOriginalLyrics")
+        discordPresence = defaults.bool(forKey: "discordPresence")
         applySound()
+        // Observers don't run during init.
+        if discordPresence { DiscordPresence.shared.setEnabled(true) }
     }
 
     private func applySound() {

@@ -15,8 +15,11 @@ import WebKit
 /// browser. The only thing taken from it is the CSV file Exportify generates, size-limited,
 /// which is read like any chosen file and then deleted.
 struct ExportifySheet: View {
+    /// Playlists exported so far in this window, newest last.
+    let exported: [ImportedPlaylist]
     let onCSV: (URL) -> Void
-    let onCancel: () -> Void
+    /// Closes the window (which signs out of Spotify, since the web view keeps nothing).
+    let onDone: () -> Void
     @ViewState private var note: String?
 
     var body: some View {
@@ -24,16 +27,31 @@ struct ExportifySheet: View {
             HStack {
                 Text("Export from Spotify").font(.headline)
                 Spacer()
-                Button("Cancel", action: onCancel)
+                Button(exported.isEmpty ? "Cancel" : "Done – Import \(exported.count) Playlist\(exported.count == 1 ? "" : "s")", action: onDone)
+                    .keyboardShortcut(exported.isEmpty ? .cancelAction : .defaultAction)
             }
             .padding(12)
-            Text("Sign in to Spotify on Exportify's page below, then press Export next to the playlist. The app reads the file it makes. Nothing is kept after this window closes.")
+            Text("Sign in to Spotify on Exportify's page below, then press Export next to each playlist you want. You can export as many as you like; this window stays open until you press Done, which also signs you out of Spotify here.")
                 .font(.callout).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12).padding(.bottom, 8)
+            if !exported.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(exported.enumerated()), id: \.offset) { _, playlist in
+                            Label("\(playlist.name) · \(playlist.tracks.count)", systemImage: "checkmark.circle.fill")
+                                .font(.callout)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(.green.opacity(0.15), in: .rect(cornerRadius: 6))
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.bottom, 8)
+            }
             if let note { Text(note).foregroundStyle(.orange).padding(.bottom, 6) }
             Divider()
-            ExportifyWebView(onCSV: onCSV, onNote: { note = $0 })
+            ExportifyWebView(onCSV: { url in note = nil; onCSV(url) }, onNote: { note = $0 })
         }
         .frame(width: 760, height: 640)
     }

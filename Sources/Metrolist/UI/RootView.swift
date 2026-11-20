@@ -63,31 +63,46 @@ struct SidebarView: View {
                 row("Artists", "music.mic", SidebarItem.artists)
                 row("Playlists", "music.note.list", SidebarItem.savedPlaylists)
                 row("Downloads", "arrow.down.circle", SidebarItem.downloads, badge: model.media.activeDownloadCount)
+                row("Music Videos", "film.stack", SidebarItem.musicVideos, badge: VideoDownloads.shared.activeCount)
                 row("History", "clock", SidebarItem.history)
             }
 
             Section("Playlists") {
-                ForEach(model.library.playlists) { playlist in
-                    row(playlist.name, "music.note.list", SidebarItem.localPlaylist(playlist.id))
-                        .contextMenu {
-                            Button("Play", systemImage: "play") {
-                                model.player.play(model.library.songs(playlist.songIds))
+                // Local playlists and those from the YouTube Music library, in one list the
+                // listener can drag into any order.
+                ForEach(model.library.sidebarPlaylists) { entry in
+                    switch entry {
+                    case .local(let playlist):
+                        row(playlist.name, model.uploadingPlaylists.contains(playlist.id) ? "arrow.triangle.2.circlepath" : "music.note.list", SidebarItem.localPlaylist(playlist.id))
+                            .contextMenu {
+                                Button("Play", systemImage: "play") {
+                                    model.player.play(model.library.songs(playlist.songIds))
+                                }
+                                Button("Download", systemImage: "arrow.down.circle") {
+                                    model.download(model.library.songs(playlist.songIds))
+                                }
+                                if model.account.isSignedIn {
+                                    if playlist.remoteId == nil {
+                                        Button("Add to YouTube Music", systemImage: "icloud.and.arrow.up") {
+                                            Task { await model.addToYouTubeMusic(playlist.id) }
+                                        }
+                                        .disabled(model.uploadingPlaylists.contains(playlist.id))
+                                    } else {
+                                        Text("On YouTube Music")
+                                    }
+                                }
+                                Divider()
+                                Button("Delete Playlist", systemImage: "trash", role: .destructive) {
+                                    if model.sidebar == .localPlaylist(playlist.id) { model.sidebar = .liked }
+                                    model.library.deletePlaylist(playlist.id)
+                                }
                             }
-                            Button("Download", systemImage: "arrow.down.circle") {
-                                model.download(model.library.songs(playlist.songIds))
-                            }
-                            Divider()
-                            Button("Delete Playlist", systemImage: "trash", role: .destructive) {
-                                if model.sidebar == .localPlaylist(playlist.id) { model.sidebar = .liked }
-                                model.library.deletePlaylist(playlist.id)
-                            }
-                        }
+                    case .remote(let playlist):
+                        row(playlist.title, "music.note.list", SidebarItem.remotePlaylist(playlist.id))
+                            .contextMenu { ItemMenu(item: .playlist(playlist)) }
+                    }
                 }
-                // Playlists from the YouTube Music library sit alongside local ones.
-                ForEach(model.library.savedPlaylists) { playlist in
-                    row(playlist.title, "music.note.list", SidebarItem.remotePlaylist(playlist.id))
-                        .contextMenu { ItemMenu(item: .playlist(playlist)) }
-                }
+                .onMove { model.library.moveSidebarPlaylists(from: $0, to: $1) }
                 Button {
                     newName = ""
                     creating = true
@@ -170,21 +185,27 @@ struct RootView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if model.isBusy {
-                    ProgressView().controlSize(.small)
+                // Left out while the full-screen player covers the window.
+                if !model.showExpandedPlayer {
+                    if model.isBusy {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button {
+                        model.toggleInspector(model.inspectorTab)
+                    } label: {
+                        Label("Now Playing", systemImage: "sidebar.trailing")
+                    }
+                    .help("Show or hide lyrics and Up Next")
                 }
-                Button {
-                    model.toggleInspector(model.inspectorTab)
-                } label: {
-                    Label("Now Playing", systemImage: "sidebar.trailing")
-                }
-                .help("Show or hide lyrics and Up Next")
             }
         }
-        .toolbar(model.showExpandedPlayer ? .hidden : .automatic, for: .windowToolbar)
+        // Not `.toolbar(.hidden, for: .windowToolbar)`: that also hides the traffic lights.
+        .background { ImmersiveWindowChrome(immersive: model.showExpandedPlayer) }
         .overlay {
             if model.showExpandedPlayer {
+                // Under the (emptied) title bar too, so the player fills the whole window.
                 ExpandedPlayerView()
+                    .ignoresSafeArea()
             }
         }
         .sheet(isPresented: Bindable(model).showMixEditor) {
@@ -227,6 +248,8 @@ struct RootView: View {
             LikedSongsView()
         case .downloads:
             DownloadsView()
+        case .musicVideos:
+            MusicVideoDownloadsView()
         case .history:
             HistoryView()
         case .albums:

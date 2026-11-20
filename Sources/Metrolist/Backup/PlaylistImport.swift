@@ -8,6 +8,8 @@ struct ImportedTrack: Identifiable, Hashable {
     var album: String?
     /// Seconds.
     var duration: Int?
+    /// The exact YouTube video, when the file names one (a "YouTube Video ID" or link column).
+    var videoId: String?
 }
 
 struct ImportedPlaylist {
@@ -162,42 +164,93 @@ enum PlaylistImporter {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size <= maxBytes else { throw PlaylistImportError.tooLarge }
         let text = try String(contentsOf: url, encoding: .utf8)
-        let tracks = url.pathExtension.lowercased() == "csv" || text.contains(",") && text.split(separator: "\n").first?.contains(",") == true ? parseCSV(text) : parseLines(text)
+        let firstLine = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let delimited = ["csv", "tsv"].contains(url.pathExtension.lowercased()) || firstLine.contains(",") || firstLine.contains(";") || firstLine.contains("\t")
+        let tracks = delimited ? parseCSV(text) : parseLines(text)
         guard !tracks.isEmpty else { throw PlaylistImportError.empty }
         return ImportedPlaylist(name: url.deletingPathExtension().lastPathComponent, tracks: Array(tracks.prefix(maxTracks)))
     }
 
     /// CSV with a header row naming the columns, as Exportify, TuneMyMusic and Apple's export write them.
+    /// Commas, semicolons or tabs may separate the fields (a leading `sep=;` line says which).
     static func parseCSV(_ text: String) -> [ImportedTrack] {
-        let rows = csvRows(text)
+        var body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+        var delimiter: Character?
+        // Excel's "sep=;" directive, on a line of its own before the header.
+        if let firstLine = body.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first,
+           firstLine.lowercased().hasPrefix("sep="), firstLine.trimmingCharacters(in: .whitespacesAndNewlines).count == 5 {
+            delimiter = firstLine.dropFirst(4).first
+            body = String(body.dropFirst(firstLine.count + 1))
+        }
+        let rows = csvRows(body, delimiter: delimiter ?? detectDelimiter(body))
         guard let header = rows.first else { return [] }
-        let names = header.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
+        let names = header.map { $0.lowercased().trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "_", with: " ") }
         // An exact name wins over one that merely starts the same way ("track name" over "track uri").
         func column(_ options: [String]) -> Int? {
             for option in options { if let exact = names.firstIndex(of: option) { return exact } }
             for option in options { if let prefix = names.firstIndex(where: { $0.hasPrefix(option + " ") || $0.hasPrefix(option + "(") }) { return prefix } }
             return nil
         }
-        guard let title = column(["track name", "track", "title", "song", "name", "song name"]) else { return parseLines(text) }
-        let artist = column(["artist name(s)", "artist name", "artist", "artists", "album artist name(s)"])
-        let album = column(["album name", "album"])
+        let link = column(["youtube video id", "video id", "videoid", "youtube id", "youtube url", "youtube link", "url", "link"])
+        guard let title = column(["track name", "track", "title", "song", "name", "song name", "track title", "song title"]) ?? link else { return parseLines(text) }
+        let artist = column(["artist name(s)", "artist name", "artist", "artists", "album artist name(s)", "creator"])
+        let album = column(["album name", "album", "album title"])
         // Exportify lists one link per artist, so a name such as "Tyler, The Creator" is only split when there are several.
         let artistLinks = column(["artist uri(s)", "artist uris"])
-        let duration = column(["duration (ms)", "track duration (ms)", "duration_ms", "duration ms", "duration", "length", "time"])
+        let duration = column(["duration (ms)", "track duration (ms)", "duration ms", "duration", "length", "time"])
         return rows.dropFirst().compactMap { row in
-            guard title < row.count, !row[title].isEmpty else { return nil }
+            func cell(_ index: Int?) -> String? {
+                guard let index, index < row.count else { return nil }
+                let value = row[index].trimmingCharacters(in: .whitespaces)
+                return value.isEmpty ? nil : value
+            }
+            let videoId = cell(link).flatMap(youTubeVideoId)
+            let titleText = title == link ? "" : (cell(title) ?? "")
+            guard !titleText.isEmpty || videoId != nil else { return nil }
             var seconds: Int?
-            if let duration, duration < row.count {
-                let raw = row[duration].trimmingCharacters(in: .whitespaces)
+            if let duration, let raw = cell(duration) {
                 if raw.contains(":") { seconds = ForeignBackup.parseDuration(raw) }
                 else if let value = Double(raw) { seconds = names[duration].contains("ms") || value > 10_000 ? Int(value / 1000) : Int(value) }
             }
-            let artistText = artist.flatMap { $0 < row.count ? row[$0] : nil } ?? ""
+            let artistText = cell(artist) ?? ""
             let single = artistLinks.map { $0 < row.count && !row[$0].contains(",") && !row[$0].isEmpty } ?? false
             let firstArtist = single ? artistText : artistText.components(separatedBy: [";", ","]).first?.trimmingCharacters(in: .whitespaces) ?? artistText
-            return ImportedTrack(title: row[title], artist: firstArtist,
-                                 album: album.flatMap { $0 < row.count && !row[$0].isEmpty ? row[$0] : nil }, duration: seconds)
+            return ImportedTrack(title: titleText, artist: firstArtist, album: cell(album), duration: seconds, videoId: videoId)
         }
+    }
+
+    /// An 11-character video id, given bare or as a youtube.com, music.youtube.com or youtu.be link.
+    static func youTubeVideoId(_ text: String) -> String? {
+        let value = text.trimmingCharacters(in: .whitespaces)
+        func valid(_ id: String) -> Bool { id.count == 11 && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") } }
+        if valid(value) { return value }
+        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host?.lowercased() else { return nil }
+        if host == "youtu.be" { let id = url.pathComponents.dropFirst().first ?? ""; return valid(id) ? id : nil }
+        guard host == "youtube.com" || host.hasSuffix(".youtube.com"), url.path == "/watch" else { return nil }
+        let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "v" }?.value ?? ""
+        return valid(id) ? id : nil
+    }
+
+    /// The separator used most consistently across the first lines, outside quotes.
+    static func detectDelimiter(_ text: String) -> Character {
+        let candidates: [Character] = [",", ";", "\t"]
+        var counts: [[Int]] = []
+        var row = [0, 0, 0], quoted = false
+        for c in text {
+            if counts.count >= 20 { break }
+            if c == "\"" { quoted.toggle() }
+            else if !quoted, c == "\n" || c == "\r" { if row.contains(where: { $0 > 0 }) { counts.append(row) }; row = [0, 0, 0] }
+            else if !quoted, let index = candidates.firstIndex(of: c) { row[index] += 1 }
+        }
+        if row.contains(where: { $0 > 0 }) { counts.append(row) }
+        // The best separator splits most lines into the same number of fields.
+        func consistency(_ index: Int) -> (Int, Int) {
+            let per = counts.map { $0[index] }.filter { $0 > 0 }
+            let modal = Dictionary(grouping: per, by: { $0 }).values.map(\.count).max() ?? 0
+            return (modal, counts.first?[index] ?? 0)
+        }
+        let best = candidates.indices.max { consistency($0) < consistency($1) } ?? 0
+        return candidates[best]
     }
 
     /// One track per line: "Artist - Title".
@@ -215,9 +268,9 @@ enum PlaylistImporter {
         }
     }
 
-    private static func csvRows(_ text: String) -> [[String]] {
+    private static func csvRows(_ text: String, delimiter: Character = ",") -> [[String]] {
         var rows: [[String]] = [], row: [String] = [], field = "", quoted = false
-        let characters = Array(text.replacingOccurrences(of: "\r\n", with: "\n"))
+        let characters = Array(text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n"))
         var index = 0
         while index < characters.count {
             let c = characters[index]
@@ -225,7 +278,7 @@ enum PlaylistImporter {
                 if c == "\"" { if index + 1 < characters.count, characters[index + 1] == "\"" { field.append("\""); index += 1 } else { quoted = false } }
                 else { field.append(c) }
             } else if c == "\"" { quoted = true }
-            else if c == "," { row.append(field); field = "" }
+            else if c == delimiter { row.append(field); field = "" }
             else if c == "\n" { row.append(field); field = ""; if !(row.count == 1 && row[0].isEmpty) { rows.append(row) }; row = [] }
             else { field.append(c) }
             index += 1
@@ -278,13 +331,24 @@ enum TrackMatcher {
     }
 
     static func match(_ track: ImportedTrack) async -> TrackMatch {
+        // A file that names the exact YouTube video needs no searching.
+        if let videoId = track.videoId, let song = await song(videoId: videoId) {
+            return TrackMatch(track: track, kind: .matched, candidates: [song], chosen: song, include: true)
+        }
         let query = "\(track.title) \(track.artist)".trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return TrackMatch(track: track, kind: .missing, candidates: [], chosen: nil, include: false) }
         let songs = ((try? await YTMusic.search(query, filter: .songs, hidingBlocked: false))?.sections.flatMap(\.items).compactMap(\.song)) ?? []
         let ranked = songs.map { ($0, score(track, $0)) }.sorted { $0.1.value > $1.1.value }
         guard let best = ranked.first else { return TrackMatch(track: track, kind: .missing, candidates: [], chosen: nil, include: false) }
         if best.1.strong { return TrackMatch(track: track, kind: .matched, candidates: ranked.prefix(4).map(\.0), chosen: best.0, include: true) }
         if best.1.value >= 0.55 { return TrackMatch(track: track, kind: .uncertain, candidates: ranked.prefix(4).map(\.0), chosen: best.0, include: false) }
         return TrackMatch(track: track, kind: .missing, candidates: ranked.prefix(4).map(\.0), chosen: nil, include: false)
+    }
+
+    /// The song behind a video id: the first entry of YouTube Music's queue for it.
+    static func song(videoId: String) async -> Song? {
+        guard let page = try? await YTMusic.queue(videoId: videoId) else { return nil }
+        return page.songs.first { $0.id == videoId }
     }
 
     /// Matches every track, a few at a time, reporting progress.

@@ -214,10 +214,23 @@ struct ExpandedPlayerView: View {
     @ViewState private var showQueue = false
 
     var body: some View {
+        let isVideo = model.player.currentSong?.isMusicVideo == true
+        let showVideo = isVideo && model.settings.showVideos
+        if showVideo {
+            VideoStageView(showQueue: $showQueue)
+                .environment(\.colorScheme, .dark)
+                .ignoresSafeArea()
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            coverPlayer(isVideo: isVideo)
+        }
+    }
+
+    private func coverPlayer(isVideo: Bool) -> some View {
         let player = model.player
         let showLyrics = model.settings.fullScreenLyrics && !showQueue
         let split = showLyrics || showQueue
-        GeometryReader { geometry in
+        return GeometryReader { geometry in
             let artSize = split
                 ? min(geometry.size.width * 0.34, geometry.size.height * 0.5, 440)
                 : min(geometry.size.width * 0.5, geometry.size.height * 0.54, 560)
@@ -227,6 +240,8 @@ struct ExpandedPlayerView: View {
                     .overlay(.black.opacity(0.55))
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
+                    // Nothing of the page shows through, even before the artwork loads.
+                    .background(Color.black)
 
                 HStack(spacing: 0) {
                     VStack(spacing: 18) {
@@ -295,6 +310,14 @@ struct ExpandedPlayerView: View {
                                     .foregroundStyle(showQueue ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                             }
                             .help(showQueue ? "Hide Up Next" : "Show Up Next")
+                            if isVideo {
+                                Button {
+                                    withAnimation(.snappy) { model.settings.showVideos = true }
+                                } label: {
+                                    Image(systemName: "film").foregroundStyle(.secondary)
+                                }
+                                .help("Show the Video")
+                            }
                         }
                         .buttonStyle(IconButtonStyle(side: 30))
                         .padding(.horizontal, 16)

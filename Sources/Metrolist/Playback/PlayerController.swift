@@ -28,6 +28,9 @@ final class PlayerController {
     private(set) var shuffle = false
     /// The album, playlist or artist the queue was started from, if any.
     private(set) var sourceId: String?
+    /// The album being played as a whole, if the queue was started from one. Autoplay adds
+    /// nothing after it, so an album ends where its artist ended it.
+    private(set) var playingAlbumId: String?
     var repeatMode: RepeatMode = .off { didSet { persist() } }
     private(set) var lyrics: Lyrics?
     private(set) var lyricsLoading = false
@@ -127,6 +130,11 @@ final class PlayerController {
                 self.mixActivity = activity
             }
         }
+        // Discord asks for the playing song when its setting is switched on mid-song.
+        DiscordPresence.shared.currentState = { [weak self] in
+            guard let self else { return nil }
+            return (self.currentSong, self.isPlaying, self.position, self.duration)
+        }
         // Play through the output chosen last time, and follow later choices.
         engine.setOutputDevice(OutputDevices.shared.selectedID)
         OutputDevices.shared.onChange = { [weak self] id in self?.engine.setOutputDevice(id) }
@@ -192,11 +200,46 @@ final class PlayerController {
     /// recording will play, so it can't be analysed yet. Once it has, the pair is planned against
     /// whatever will really play: the audio release, or the video's own audio when there is none.
     private func awaitingAudioVersion(_ song: Song) -> Bool {
-        settings.preferAudioVersions && song.isVideo && !media.isAvailableOffline(song.id) && counterparts[song.id] == nil
+        swapsForAudio(song) && counterparts[song.id] == nil
+    }
+
+    /// Videos the listener started themselves (a live performance or music video clicked on
+    /// an artist page, in search…). They play as videos, picture included; only videos that
+    /// arrive on their own (playlists, radio, Autoplay) are swapped for their audio release.
+    @ObservationIgnored private(set) var chosenVideos: Set<String> = []
+    /// Called when the listener starts a video themselves.
+    @ObservationIgnored var onChosenVideo: (() -> Void)?
+
+    /// Whether a video is replaced by its audio release when it plays.
+    private func swapsForAudio(_ song: Song) -> Bool {
+        settings.preferAudioVersions && song.isVideo && !media.isAvailableOffline(song.id) && !chosenVideos.contains(song.id)
+    }
+
+    /// A music video or live performance playing as itself (not swapped for its audio release)
+    /// is never mixed into or out of: its picture would jump, and the switch between video and
+    /// cover doesn't change that. A video still in the queue is swapped (or not) before this is
+    /// asked, so a music video here is one that will really play. Uploads that stand in for
+    /// songs (`isVideo` but not `isMusicVideo`) mix like songs.
+    private func playsAsVideo(_ song: Song) -> Bool { song.isMusicVideo }
+
+    /// A music video is playing as itself: Autoplay then lines up only music videos, and
+    /// music videos queued behind it play as videos too.
+    /// Only a video the listener started themselves counts: one that turned up in a playlist
+    /// without an audio release plays as itself, but doesn't turn what follows into videos.
+    var isVideoSession: Bool {
+        guard let song = currentSong, song.isMusicVideo else { return false }
+        return chosenVideos.contains(song.id)
+    }
+
+    /// Music videos queued during a video session play as videos, not as their audio release.
+    private func adoptVideos(_ songs: [Song]) {
+        guard isVideoSession else { return }
+        chosenVideos.formUnion(songs.filter(\.isMusicVideo).map(\.id))
     }
 
     private func mixEligible(_ current: Song, _ next: Song) -> Bool {
         guard repeatMode != .one, !awaitingAudioVersion(next) else { return false }
+        if playsAsVideo(current) || playsAsVideo(next) { return false }
         if !settings.mixAlbums, let album = current.album?.id, album == next.album?.id { return false }
         return true
     }
@@ -206,6 +249,7 @@ final class PlayerController {
         guard let current = currentSong, let next = nextSong else { return "Nothing queued to mix into" }
         if repeatMode == .one { return "Repeats this song" }
         if awaitingAudioVersion(next) { return "Looking for the audio version of the next track…" }
+        if playsAsVideo(current) || playsAsVideo(next) { return "Plays straight through (music videos aren't mixed)" }
         if !settings.mixAlbums, let album = current.album?.id, album == next.album?.id { return "Plays straight through (same album)" }
         return "Plays straight through"
     }
@@ -483,7 +527,8 @@ final class PlayerController {
     /// Looks a few Autoplay songs ahead, has them fetched and analysed, and moves the one that
     /// mixes best out of the playing song to the front (`MixSequencer`).
     private func sequenceAutoQueue() {
-        guard sequencesAutoQueue, let currentIndex, let current = currentSong else { return }
+        // Videos aren't mixed, so there is no order to choose for mixing.
+        guard sequencesAutoQueue, !isVideoSession, let currentIndex, let current = currentSong else { return }
         let start = currentIndex + 1
         // Play Next songs (and one already fading in) come first; Autoplay's order is chosen
         // to follow the playing song, so it waits until they have played.
@@ -591,6 +636,23 @@ final class PlayerController {
 
     @ObservationIgnored private var resolvingAudio: Set<String> = []
 
+    /// Brings the queue's copies of songs up to date with their newly learned video types.
+    func applyVideoTypes(_ types: [String: String]) {
+        func update(_ songs: inout [Song]) {
+            for index in songs.indices {
+                guard let type = types[songs[index].id], !type.isEmpty, songs[index].videoType != type else { continue }
+                songs[index].videoType = type
+                songs[index].isVideo = Parser.isVideoType(type)
+            }
+        }
+        update(&queue)
+        if var original = unshuffledQueue {
+            update(&original)
+            unshuffledQueue = original
+        }
+        persist()
+    }
+
     /// Tests: what the audio-release lookup will answer for a video, without the network.
     func setAudioVersionForTesting(_ videoId: String, _ audio: Song?) { counterparts[videoId] = .some(audio) }
 
@@ -599,7 +661,7 @@ final class PlayerController {
     private func resolveNextAudioVersion() {
         guard let currentIndex, currentIndex + 1 < queue.count else { return }
         let next = queue[currentIndex + 1]
-        guard settings.preferAudioVersions, next.isVideo, !media.isAvailableOffline(next.id) else { return }
+        guard swapsForAudio(next) else { return }
         if let known = counterparts[next.id] {
             if let audio = known { replaceUpcoming(next, with: audio) }
             return
@@ -626,11 +688,25 @@ final class PlayerController {
     // MARK: - Starting playback
 
     /// Replaces the queue and starts playing at `index`.
-    func play(_ songs: [Song], startAt index: Int = 0, shuffled: Bool = false, source: String? = nil) {
-        guard !songs.isEmpty else { return }
-        sourceId = source
+    /// `chosen`: the listener picked the starting song itself (clicked its row), so a video
+    /// there plays as a video.
+    func play(_ songs: [Song], startAt index: Int = 0, shuffled: Bool = false, source: String? = nil, chosen: Bool = false) {
+        // Songs YouTube Music greys out can't be played; leave them out of the queue.
+        var index = index
         var songs = songs
-        var index = min(max(0, index), songs.count - 1)
+        if songs.contains(where: { $0.unavailable == true }) {
+            let target = songs.indices.contains(index) ? songs[index].id : nil
+            songs.removeAll { $0.unavailable == true }
+            index = target.flatMap { id in songs.firstIndex { $0.id == id } } ?? min(index, max(0, songs.count - 1))
+        }
+        guard !songs.isEmpty else { return }
+        if chosen, !shuffled, songs.indices.contains(index), songs[index].isMusicVideo {
+            chosenVideos.insert(songs[index].id)
+            onChosenVideo?()
+        }
+        sourceId = source
+        playingAlbumId = Self.albumId(of: songs, source: source)
+        index = min(max(0, index), songs.count - 1)
         unshuffledQueue = nil
         shuffle = shuffled
         if shuffled {
@@ -649,7 +725,7 @@ final class PlayerController {
 
     /// Plays one song and lets YouTube Music's radio fill the queue behind it.
     func play(song: Song) {
-        play([song])
+        play([song], chosen: true)
     }
 
     func playRadio(for song: Song) {
@@ -667,6 +743,7 @@ final class PlayerController {
         let after = queue[at - 1]
         queue.insert(contentsOf: songs, at: at)
         markQueuedByHand(songs.map(\.id), playNext: true)
+        adoptVideos(songs)
         // The order to return to when shuffle is switched off has them in the same place.
         if var original = unshuffledQueue {
             let place = original.firstIndex(of: after).map { $0 + 1 } ?? min(original.count, currentIndex + 1)
@@ -687,6 +764,7 @@ final class PlayerController {
         }
         queue.append(contentsOf: songs)
         markQueuedByHand(songs.map(\.id), playNext: false)
+        adoptVideos(songs)
         unshuffledQueue?.append(contentsOf: songs)
         persist()
     }
@@ -965,7 +1043,7 @@ final class PlayerController {
 
         Task {
             var song = song
-            if settings.preferAudioVersions, song.isVideo, !media.isAvailableOffline(song.id) {
+            if swapsForAudio(song) {
                 if let audio = await audioVersion(of: song), token == loadToken,
                    let index = currentIndex, queue.indices.contains(index), queue[index].id == song.id {
                     queue[index] = audio
@@ -990,7 +1068,9 @@ final class PlayerController {
 
     private func audioVersion(of song: Song) async -> Song? {
         if let known = counterparts[song.id] { return known }
-        let found = await YTMusic.audioCounterpart(for: song)
+        // Only videos that arrived on their own are swapped, and for those the listener wants
+        // the release even when the video is a longer cut (as the playlist page decides).
+        let found = await YTMusic.audioCounterpart(for: song, strictLength: false)
         counterparts[song.id] = .some(found)
         return found
     }
@@ -1154,9 +1234,17 @@ final class PlayerController {
         extendQueueIfNeeded()
     }
 
+    /// The album a list of songs makes up: started from an album page, or two or more songs
+    /// that all come from the same album. Nil for playlists, mixes and single songs.
+    static func albumId(of songs: [Song], source: String?) -> String? {
+        if let source, source.hasPrefix("MPRE") { return source }
+        guard songs.count > 1, let first = songs.first?.album?.id else { return nil }
+        return songs.allSatisfy { $0.album?.id == first } ? first : nil
+    }
+
     /// Appends radio tracks when the queue is about to run out.
     private func extendQueueIfNeeded() {
-        guard settings.autoplay, !isExtending, repeatMode == .off,
+        guard settings.autoplay, !isExtending, repeatMode == .off, playingAlbumId == nil,
               // With AutoMix choosing the order, keep enough lined up to choose between.
               let currentIndex, queue.count - currentIndex <= (sequencesAutoQueue ? MixSequencer.pool + 1 : 2), let seed = queue.last,
               NetworkStatus.shared.isOnline, Date() >= extendBlockedUntil
@@ -1176,15 +1264,28 @@ final class PlayerController {
                 return
             }
             let existing = Set(queue.map(\.id))
-            let unseen = page.songs.filter { !existing.contains($0.id) }
+            var unseen = page.songs.filter { !existing.contains($0.id) }
+            // After a music video, only music videos: each song's video counterpart (as
+            // YouTube Music's own audio/video switch pairs them), or the video itself.
+            let videosOnly = isVideoSession
+            if videosOnly {
+                var seen = existing
+                unseen = page.songs.compactMap { song -> Song? in
+                    let video = song.isMusicVideo ? song : page.counterparts[song.id].flatMap { $0.isMusicVideo ? $0 : nil }
+                    guard let video, seen.insert(video.id).inserted else { return nil }
+                    return video
+                }
+            }
             // Hidden artists and the AI-artist list are filtered out here, before anything is
             // queued, so their songs are never downloaded or analysed.
             let fresh = ContentFilter.shared.filter(unseen)
+            if videosOnly { chosenVideos.formUnion(fresh.map(\.id)) }
             appendAutoQueued(fresh)
             radioContinuation = page.continuation
             library.remember(fresh)
-            if fresh.isEmpty, !unseen.isEmpty {
-                // Everything on this page was filtered: look at the next one soon.
+            if fresh.isEmpty, !unseen.isEmpty || (videosOnly && !page.songs.isEmpty && page.continuation != nil) {
+                // Everything on this page was filtered (or, after a video, had no video):
+                // look at the next one soon.
                 extendBlockedUntil = Date().addingTimeInterval(2)
             } else if fresh.isEmpty {
                 // Stop asking when the radio has nothing new, to avoid a request loop.
@@ -1206,6 +1307,7 @@ final class PlayerController {
             duration: duration,
             liked: song.map { library.isLiked($0.id) } ?? false
         )
+        DiscordPresence.shared.update(song: song, playing: isPlaying, position: position, duration: duration)
     }
 
     private func persist() {
@@ -1231,6 +1333,7 @@ final class PlayerController {
         else { return }
         queue = saved.queue
         currentIndex = index
+        playingAlbumId = Self.albumId(of: saved.queue, source: nil)
         repeatMode = saved.repeatMode
         resumePosition = saved.position
         position = saved.position

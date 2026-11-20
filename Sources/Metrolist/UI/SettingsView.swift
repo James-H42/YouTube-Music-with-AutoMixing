@@ -30,6 +30,14 @@ struct GeneralSettings: View {
             Text("Playback also appears in Control Center's Now Playing and responds to the media keys.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            Section("Artwork from Apple Music") {
+                Toggle("Use Apple Music's artist pictures", isOn: $settings.appleArtistImages)
+                Toggle("Play animated artist pictures", isOn: $settings.animatedArtistArtwork)
+                Toggle("Play animated album covers", isOn: $settings.animatedAlbumCovers)
+                Text("Artist and album pages ask Apple Music (through its public web player and the iTunes Search API, without an Apple account) for the artist's picture and, where Apple has made them, moving artwork. Only the artist's name and the album's title are sent. Videos play silently and loop; with Reduce Motion on they don't play.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }
@@ -45,7 +53,16 @@ struct PlaybackSettings: View {
                 ForEach(AudioQuality.allCases) { Text($0.title).tag($0) }
             }
             Toggle("Prefer audio versions over music videos", isOn: $settings.preferAudioVersions)
+                .help("For videos in playlists, radio and Autoplay. A video you choose yourself plays as a video.")
+            Toggle("Show the video of music videos and live performances", isOn: $settings.showVideos)
+            Picker("Video quality", selection: $settings.videoQuality) {
+                ForEach(VideoQuality.choices, id: \.self) { Text(VideoQuality.title($0)).tag($0) }
+            }
+            .disabled(!settings.showVideos)
+            .help("Auto adapts to the window and the connection. A fixed quality uses the nearest one a video has at or below it.")
             Toggle("Show romanised lyrics for non-Latin scripts", isOn: $settings.showRomanization)
+            Toggle("Show only the romanised lyrics (hide the original script)", isOn: $settings.hideOriginalLyrics)
+                .disabled(!settings.showRomanization)
             Toggle("Autoplay similar songs when the queue ends", isOn: $settings.autoplay)
             Section("AutoMix") {
                 Toggle("Mix between songs like a DJ", isOn: $settings.autoMix)
@@ -192,13 +209,25 @@ struct ContentSettings: View {
 }
 
 struct IntegrationsSettings: View {
+    @Environment(AppModel.self) private var model
     @Bindable private var scrobbler = Scrobbler.shared
     @ViewState private var apiKey = ""
     @ViewState private var secret = ""
     @ViewState private var token = ""
+    @AppStorage("discordApplicationId") private var discordApplicationId = ""
 
     var body: some View {
+        @Bindable var settings = model.settings
         Form {
+            Section("Discord") {
+                Toggle("Show what I'm listening to on Discord", isOn: $settings.discordPresence)
+                if settings.discordPresence {
+                    LabeledContent("Status", value: DiscordPresence.shared.status)
+                    TextField("Application ID (optional)", text: $discordApplicationId, prompt: Text(DiscordPresence.defaultApplicationId))
+                }
+                Text("Uses the Discord app on this Mac, which must be open; nothing is sent anywhere else and no Discord sign-in is needed. Discord shows the song, artist, artwork and a link to it on YouTube Music. The activity is labelled with Metrolist's Discord application unless you enter your own (create one at discord.com/developers).")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             Section("Last.fm") {
                 if scrobbler.isLastFmSignedIn {
                     LabeledContent("Signed in as", value: scrobbler.lastFmUser ?? "")

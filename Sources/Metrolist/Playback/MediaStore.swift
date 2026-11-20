@@ -267,6 +267,13 @@ final class MediaStore {
         records.values.filter(\.pinned).sorted { $0.addedAt > $1.addedAt }.map(\.videoId)
     }
 
+    /// A download that is a music video or live performance (listed under Music Videos, not
+    /// Downloads): its picture is saved, or it is one by YouTube Music's own type.
+    func isVideoDownload(_ videoId: String) -> Bool {
+        VideoDownloads.shared.isDownloaded(videoId) || VideoDownloads.shared.isDownloading(videoId)
+            || songProvider?(videoId)?.isMusicVideo == true
+    }
+
     var downloadedBytes: Int64 { records.values.filter(\.pinned).reduce(0) { $0 + $1.bytes } }
     var cacheBytes: Int64 { records.values.filter { !$0.pinned }.reduce(0) { $0 + $1.bytes } }
     var activeDownloadCount: Int { queued.count + pinRequested.intersection(active.keys).count }
@@ -420,6 +427,8 @@ final class MediaStore {
     func download(_ videoIds: [String]) {
         for videoId in videoIds {
             failed.remove(videoId)
+            // A music video or live performance keeps its picture too.
+            if songProvider?(videoId)?.isMusicVideo == true { VideoDownloads.shared.download(videoId) }
             if var record = records[videoId] {
                 if !record.pinned {
                     record.pinned = true
@@ -453,6 +462,7 @@ final class MediaStore {
     }
 
     func removeDownload(_ videoId: String) {
+        VideoDownloads.shared.remove(videoId)
         queued.removeAll { $0 == videoId }
         failed.remove(videoId)
         if pinRequested.remove(videoId) != nil {

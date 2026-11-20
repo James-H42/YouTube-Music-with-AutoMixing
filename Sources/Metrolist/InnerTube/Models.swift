@@ -20,9 +20,21 @@ struct Song: Codable, Hashable, Identifiable {
     var explicit = false
     /// True when the item is a music video or user upload rather than an audio (art-track) release.
     var isVideo = false
+    /// YouTube Music's kind of video (`MUSIC_VIDEO_TYPE_OMV`, `…_UGC`, `…_ATV`…). Nil for
+    /// songs saved before it was kept.
+    var videoType: String?
     var setVideoId: String?
+    /// YouTube Music greys this song out (removed, or not available in this country).
+    /// Optional so libraries saved before it existed still load.
+    var unavailable: Bool?
 
     var artistText: String { artists.map(\.name).joined(separator: ", ") }
+
+    /// A music video or live performance from the artist or label: it plays with its picture
+    /// and is never mixed. Fan and channel uploads that stand in for songs (`UGC`: leaks,
+    /// lyric videos, re-uploads) are videos only in name and play as audio.
+    var isMusicVideo: Bool { isVideo && Song.pictureTypes.contains(videoType ?? "") }
+    static let pictureTypes: Set<String> = ["MUSIC_VIDEO_TYPE_OMV"]
 
     /// True for the same recording even when YouTube lists it under another video id
     /// (album track vs. single, or the copy saved in Liked Music).

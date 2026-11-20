@@ -15,9 +15,11 @@ enum LyricsSource: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// The order tried by default. The first two are what earlier versions used, so what they
-    /// find is unchanged; the newer ones are only asked when those found nothing timed.
-    static let defaultOrder: [LyricsSource] = [.betterLyrics, .lrcLib, .simpMusic, .lrcRed, .youTube]
+    /// The order tried by default, following Metrolist 14's priority (word-timed sources
+    /// first: BetterLyrics, lrc.red, then LRCLIB; YouTube Music's own lyrics last). SimpMusic,
+    /// which Metrolist doesn't rank, comes before YouTube. A saved order is kept as it is.
+    /// Lyrics already cached for a song are not fetched again.
+    static let defaultOrder: [LyricsSource] = [.betterLyrics, .lrcRed, .lrcLib, .simpMusic, .youTube]
 }
 
 /// The listener's choice of lyric sources: which are used, in which order.

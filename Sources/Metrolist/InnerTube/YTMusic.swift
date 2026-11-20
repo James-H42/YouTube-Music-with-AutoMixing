@@ -283,6 +283,24 @@ enum YTMusic {
         return page
     }
 
+    /// YouTube Music's video type (`MUSIC_VIDEO_TYPE_OMV`, `…_UGC`, `…_ATV`…) of up to 50
+    /// videos in one request, as the web player's "add to queue" asks for them. Ids it doesn't
+    /// answer for (removed videos) are left out.
+    static func videoTypes(_ videoIds: [String]) async throws -> [String: String] {
+        let json = try await api.post("music/get_queue", body: ["videoIds": Array(videoIds.prefix(50))])
+        var types: [String: String] = [:]
+        for entry in json["queueDatas"].array {
+            let content = entry["content"]
+            let renderers = [content["playlistPanelVideoRenderer"], content["playlistPanelVideoWrapperRenderer"]["primaryRenderer"]["playlistPanelVideoRenderer"]]
+                + content["playlistPanelVideoWrapperRenderer"]["counterpart"].array.map { $0["counterpartRenderer"]["playlistPanelVideoRenderer"] }
+            for renderer in renderers where renderer.exists {
+                guard let song = Parser.panelVideo(renderer), let type = song.videoType else { continue }
+                types[song.id] = type
+            }
+        }
+        return types
+    }
+
     /// The endless radio seeded by a single song.
     static func radio(for videoId: String) async throws -> QueuePage {
         try await queue(videoId: videoId, playlistId: "RDAMVM" + videoId, params: "wAEB")
@@ -299,7 +317,9 @@ enum YTMusic {
 
     /// Finds the audio (art-track) release matching a music video, so the app never plays a
     /// video's soundtrack when a proper song version exists.
-    static func audioCounterpart(for song: Song) async -> Song? {
+    /// `strictLength` off (playlists, radio, Autoplay): a release of another length is taken
+    /// when it's the closest match, since music videos often add intros or skits.
+    static func audioCounterpart(for song: Song, strictLength: Bool = true) async -> Song? {
         guard song.isVideo else { return nil }
         // When the item names its album, the album's own track list is authoritative: it is
         // the distributor's audio for exactly that edition (explicit or clean).
@@ -313,6 +333,17 @@ enum YTMusic {
            let counterpart = page.counterparts[song.id], !counterpart.isVideo {
             return counterpart
         }
+        return await searchedAudioVersion(for: song, strictLength: strictLength)
+    }
+
+    /// The audio release of a music video found by searching YouTube Music's songs: one
+    /// request. The title (without decorations), the version (live, remix…) and an artist
+    /// must agree, and the length must be within 20 seconds of the video's.
+    ///
+    /// With `strictLength` off (playlists), a release whose length differs more is still
+    /// taken when nothing closer matches: music videos often add intros or skits.
+    static func searchedAudioVersion(for song: Song, strictLength: Bool = true) async -> Song? {
+        guard song.isVideo else { return nil }
         // Uploads titled "Artist - Song" name the real artist in the title, not as the uploader.
         let unbracketed = song.title.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
         let titleArtist = unbracketed.range(of: " - ").map { String(unbracketed[..<$0.lowerBound]) }
@@ -336,8 +367,11 @@ enum YTMusic {
         }
         guard let length = song.duration else { return matches.first }
         // Prefer the edit whose length matches the video; never swap in a clearly different cut.
-        return matches
-            .filter { abs(($0.duration ?? length) - length) <= 20 }
+        let close = matches.filter { abs(($0.duration ?? length) - length) <= 20 }
+        if close.isEmpty, !strictLength {
+            return matches.min { abs(($0.duration ?? length) - length) < abs(($1.duration ?? length) - length) }
+        }
+        return close
             .min { first, second in
                 // An explicit video maps to the explicit recording. Otherwise, between equally
                 // titled cuts, the explicit one is the original album version.
@@ -346,6 +380,62 @@ enum YTMusic {
                 if (first.album != nil) != (second.album != nil) { return first.album != nil }
                 return abs((first.duration ?? length) - length) < abs((second.duration ?? length) - length)
             }
+    }
+
+    /// Audio releases for the music videos of a playlist, keyed by the video's id, reported
+    /// as they are found (first rows first). Signed-in queues can pair each video with its
+    /// song version, so that is asked first, in one request; the rest are searched, several
+    /// at a time, and every answer (including "none") is remembered on disk.
+    /// `found` receives answers as they come: a song, or nil inside the optional for "none".
+    static func audioVersions(forPlaylist playlistId: String?, videos: [Song], found: @escaping @MainActor ([String: Song?]) -> Void) async {
+        var wanted = videos.filter(\.isVideo)
+        guard !wanted.isEmpty else { return }
+        let cache = AudioVersionCache.shared
+        let known = await cache.lookup(wanted.map(\.id))
+        if !known.isEmpty { await found(known) }
+        wanted.removeAll { known[$0.id] != nil }
+        guard !wanted.isEmpty else { return }
+
+        // Only signed-in queues carry the pairs; an anonymous one never does, so skip it.
+        if let playlistId, api.isSignedIn {
+            let id = playlistId.hasPrefix("VL") ? String(playlistId.dropFirst(2)) : playlistId
+            if let page = try? await queue(playlistId: id), !page.counterparts.isEmpty {
+                let ids = Set(wanted.map(\.id))
+                let paired = page.counterparts.filter { ids.contains($0.key) && !$0.value.isVideo && $0.value.id != $0.key }
+                if !paired.isEmpty {
+                    await cache.store(paired.mapValues { Optional($0) })
+                    await found(paired.mapValues { Optional($0) })
+                    wanted.removeAll { paired[$0.id] != nil }
+                }
+            }
+        }
+
+        // Searches, eight at a time, in the order the songs are listed.
+        await withTaskGroup(of: (String, Song?).self) { group in
+            var next = 0
+            func launch() {
+                guard next < wanted.count else { return }
+                let video = wanted[next]
+                next += 1
+                group.addTask { (video.id, await searchedAudioVersion(for: video, strictLength: false)) }
+            }
+            for _ in 0 ..< min(8, wanted.count) { launch() }
+            var batch: [String: Song?] = [:]
+            for await (id, audio) in group {
+                batch[id] = audio
+                // Report in small batches so the list doesn't redraw for every song.
+                if batch.count >= 4 || next >= wanted.count {
+                    await cache.store(batch)
+                    await found(batch)
+                    batch = [:]
+                }
+                launch()
+            }
+            if !batch.isEmpty {
+                await cache.store(batch)
+                await found(batch)
+            }
+        }
     }
 
     /// The bare song title: no "Artist - " prefix, bracketed decorations or featured-artist credits.
@@ -451,6 +541,55 @@ enum YTMusic {
         components.queryItems = items
         guard let url = components.url else { throw YTError.parse("playback tracking") }
         return try await api.authorizedGet(url)
+    }
+
+    // MARK: - Account playlists
+
+    /// Creates a playlist on the signed-in account and returns its id. It is private, so it
+    /// shows on the listener's own devices and nowhere else.
+    static func createPlaylist(title: String, description: String = "", videoIds: [String]) async throws -> String {
+        guard api.isSignedIn else { throw YTError.parse("a playlist: not signed in") }
+        // Long lists go in batches: the first with the playlist, the rest added afterwards.
+        let first = Array(videoIds.prefix(100))
+        let json = try await api.post("playlist/create", body: [
+            "title": String(title.prefix(150)), "description": String(description.prefix(300)),
+            "privacyStatus": "PRIVATE", "videoIds": first,
+        ])
+        guard let id = json["playlistId"].string, !id.isEmpty else { throw YTError.parse("the new playlist") }
+        var rest = Array(videoIds.dropFirst(first.count))
+        while !rest.isEmpty {
+            try await addToPlaylist(id, videoIds: Array(rest.prefix(100)))
+            rest.removeFirst(min(100, rest.count))
+        }
+        return id
+    }
+
+    static func addToPlaylist(_ playlistId: String, videoIds: [String]) async throws {
+        guard !videoIds.isEmpty else { return }
+        let actions = videoIds.map { ["action": "ACTION_ADD_VIDEO", "addedVideoId": $0, "dedupeOption": "DEDUPE_OPTION_SKIP"] }
+        try await editPlaylist(playlistId, actions: actions)
+    }
+
+    /// Removes songs by video id. The playlist is read first, because removing needs the id of
+    /// each entry (`setVideoId`), not only the song's.
+    static func removeFromPlaylist(_ playlistId: String, videoIds: Set<String>) async throws {
+        let entries = try await allPlaylistSongs(playlistId).filter { videoIds.contains($0.id) }
+        let actions: [[String: Any]] = entries.compactMap { song in
+            song.setVideoId.map { ["action": "ACTION_REMOVE_VIDEO", "removedVideoId": song.id, "setVideoId": $0] }
+        }
+        guard !actions.isEmpty else { return }
+        try await editPlaylist(playlistId, actions: actions)
+    }
+
+    static func renamePlaylist(_ playlistId: String, to name: String) async throws {
+        try await editPlaylist(playlistId, actions: [["action": "ACTION_SET_PLAYLIST_NAME", "playlistName": String(name.prefix(150))]])
+    }
+
+    private static func editPlaylist(_ playlistId: String, actions: [[String: Any]]) async throws {
+        guard api.isSignedIn else { throw YTError.parse("the playlist: not signed in") }
+        let id = playlistId.hasPrefix("VL") ? String(playlistId.dropFirst(2)) : playlistId
+        let json = try await api.post("browse/edit_playlist", body: ["playlistId": id, "actions": actions])
+        if let status = json["status"].string, status != "STATUS_SUCCEEDED" { throw YTError.parse("the playlist change (\(status))") }
     }
 
     static func setLiked(_ liked: Bool, videoId: String) async throws {

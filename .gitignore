@@ -19,6 +19,9 @@ samples.json
 .source-backup-*
 COMMIT_MESSAGE.txt
 CLAUDE.md
+docs/PROJECT_GUIDE.md
+docs/test.csv
 
 # Must Include
 !README.md
+!docs/PROJECT_GUIDE.md
