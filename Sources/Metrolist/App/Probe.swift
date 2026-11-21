@@ -215,7 +215,7 @@ enum Probe {
             guard let (song, file) = await fetch(query, media: media) else { print("\(query): could not fetch"); continue }
             let started = Date()
             guard let analysis = await TrackAnalyzer.shared.analysis(videoId: song.id, file: file) else { print("\(song.title): analysis failed"); continue }
-            print(String(format: "%@ — %@\n   %.1f BPM (confidence %.2f) | %@ %@ (confidence %.2f) | %d beats, bar phase %d | audible %.1f–%.1f s, intro ends %.1f, outro starts %.1f of %.1f | %.2fs",
+            print(String(format: "%@ — %@ [\(song.id)]\n   %.1f BPM (confidence %.2f) | %@ %@ (confidence %.2f) | %d beats, bar phase %d | audible %.1f–%.1f s, intro ends %.1f, outro starts %.1f of %.1f | %.2fs",
                          song.title, song.artistText, analysis.bpm, analysis.beatConfidence, analysis.camelot, analysis.keyName, analysis.keyConfidence,
                          analysis.beats.count, analysis.downbeatPhase, analysis.audibleStart, analysis.audibleEnd, analysis.introEnd, analysis.outroStart,
                          analysis.duration, Date().timeIntervalSince(started)))
@@ -380,12 +380,14 @@ enum Probe {
         var skip = false
         for argument in arguments {
             if skip { skip = false; continue }
-            if argument == "--preset" || argument == "--pick" { skip = true; continue }
+            if argument == "--preset" || argument == "--pick" || argument == "--lead" { skip = true; continue }
             if !argument.hasPrefix("--") { queries.append(argument) }
         }
         guard let pair = await preparePair(queries, media: media) else { print("could not prepare both tracks"); return }
         let (songA, songB, a, b) = (pair.songs[0], pair.songs[1], pair.a, pair.b)
-        let plans = MixPlanner.candidates(from: a, to: b, lyricsA: pair.lyricsA, lyricsB: pair.lyricsB)
+        var mixOptions = MixOptions()
+        mixOptions.stems = arguments.contains("--stems")
+        let plans = MixPlanner.candidates(from: a, to: b, lyricsA: pair.lyricsA, lyricsB: pair.lyricsB, options: mixOptions)
         guard var plan = plans.indices.contains(Int(option("--pick") ?? "0") ?? 0) ? plans[Int(option("--pick") ?? "0") ?? 0] : nil else {
             print("no plan (would play gaplessly)"); return
         }
@@ -406,7 +408,23 @@ enum Probe {
         engine.onActivity = { activity = $0 }
         func wait(_ seconds: Double) async { try? await Task.sleep(for: .milliseconds(Int(seconds * 1000))) }
 
-        engine.load(media.open(videoId: songA.id), startAt: max(0, plan.outStart - 5 - (plan.approach ?? 0)), autoplay: true, normalize: true, mixReady: !arguments.contains("--no-glide"))
+        // `--lead s`: how long before the mix point the first song starts (5 s by default; the
+        // player queues the next song about 30 s ahead, which stem separation needs).
+        let lead = Double(option("--lead") ?? "") ?? 5
+        // `--ahead`: separate the stems first, as the player now does as soon as the plan is
+        // known, so a short lead (a preview) has them in place.
+        if arguments.contains("--ahead"), let fileA = media.open(videoId: songA.id).fileURL, let fileB = media.open(videoId: songB.id).fileURL {
+            let started = Date()
+            engine.separateStemsAhead(plan, current: fileA, next: fileB)
+            let stretches = MixEngine.stemStretches(plan)
+            while Date().timeIntervalSince(started) < 60,
+                  !(StemSeparator.isCached(file: fileA, from: stretches.outgoing.start, to: stretches.outgoing.end)
+                    && StemSeparator.isCached(file: fileB, from: stretches.incoming.start, to: stretches.incoming.end)) {
+                await wait(0.1)
+            }
+            print(String(format: "stems separated ahead in %.1f s", Date().timeIntervalSince(started)))
+        }
+        engine.load(media.open(videoId: songA.id), startAt: max(0, plan.outStart - lead - (plan.approach ?? 0)), autoplay: true, normalize: true, mixReady: !arguments.contains("--no-glide"))
         await wait(1.5)
         engine.enqueueNext(media.open(videoId: songB.id), plan: plan)
 

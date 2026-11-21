@@ -48,6 +48,18 @@ enum AppPaths {
     /// Apple Music artist pictures and animated covers found so far (addresses only).
     static let appleArtwork = root.appendingPathComponent("apple-artwork.json")
 
+    /// Where the app's settings (`AppSettings`) are kept. A run with METROLIST_HOME (every test)
+    /// keeps them in a separate domain: tests switch Autoplay, AutoMix and the rest off and on,
+    /// and when they ran from the packaged app they changed the listener's own settings
+    /// (Autoplay was found switched off on 2026-11-21).
+    nonisolated(unsafe) static let settings: UserDefaults = {
+        if let override = ProcessInfo.processInfo.environment["METROLIST_HOME"], !override.isEmpty,
+           let separate = UserDefaults(suiteName: "app.metrolist.mac.automix.tests") {
+            return separate
+        }
+        return .standard
+    }()
+
     private static func directory(_ url: URL) -> URL {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

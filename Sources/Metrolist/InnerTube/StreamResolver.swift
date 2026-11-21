@@ -120,7 +120,7 @@ actor StreamResolver {
             guard botChecked, attempt == 0 else { break }
             InnerTube.shared.resetStreamVisitorData()
         }
-        if botChecked, InnerTube.shared.isSignedIn, UserDefaults.standard.object(forKey: "accountPlayback") as? Bool ?? true {
+        if botChecked, InnerTube.shared.isSignedIn, AppPaths.settings.object(forKey: "accountPlayback") as? Bool ?? true {
             // The connection is refused anonymously. As Metrolist does, fall back to asking as
             // the signed-in listener, through YouTube Music's own web identity.
             do {

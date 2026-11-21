@@ -76,6 +76,11 @@ struct PlaybackSettings: View {
                 .disabled(!settings.autoMix)
                 Toggle("Match keys by shifting pitch when it helps", isOn: $settings.mixKeyMatch)
                     .disabled(!settings.autoMix || settings.mixStyle == .fade)
+                Toggle("Mix with stems (vocals, bass, drums)", isOn: $settings.mixStems)
+                    .disabled(!settings.autoMix || settings.mixStyle == .fade || !StemSeparator.isInstalled)
+                    .help(StemSeparator.isInstalled
+                        ? "During a beat-matched transition, splits both songs into vocals, drums, bass and the rest on this Mac, so the outgoing vocals can step aside for the new ones and bass and drums hand over cleanly, as DJs do with stems."
+                        : "Needs the stem model (Models/HTDemucs.mlpackage), which isn't installed.")
                 Toggle("Order Autoplay songs for smoother mixes", isOn: $settings.mixOrdersQueue)
                     .disabled(!settings.autoMix || settings.mixStyle == .fade)
                     .help("Looks a few Autoplay songs ahead and plays next the one whose tempo and key fit the playing song best. Songs you queue yourself, albums and playlists keep their order.")

@@ -44,15 +44,50 @@ enum MixSequencer {
         return (min((one - two + 12) % 12, (two - one + 12) % 12), a.isMinor == b.isMinor)
     }
 
+    /// What DJs weigh when they choose the next record, learned on 2026-11-21 from 25 DJ-made
+    /// sequences (Spotify "Mixed By" playlists, Ministry of Sound mix albums, Kanye West & A-Trak's
+    /// Soul Mix Show; `Tools/ml/train_sequencer.py`). Each transition's next song competed against
+    /// four others from the same sequence, in a conditional logit model. Held out by sequence,
+    /// the DJ's choice ranked first 30.1 % of the time against 27.3 % for the hand-set weights this
+    /// replaces (0.5 tempo, 0.3 key, 0.2 artist) and 20 % by chance. Mean reciprocal rank rose by
+    /// 0.024 (95 % interval 0.001 … 0.046). DJs care most about tempo; key matters far less than
+    /// the hand-set weights assumed. Values are log-odds; the tempo gap is in units of 12 %.
+    private enum Learned {
+        static let tempoGap = -0.632
+        static let tempoOver12 = -0.150
+        static let tempoFree = -0.985
+        static let halfDouble = 0.301
+        static let compatible = 0.162
+        static let diagonal = -0.111
+        static let shift1 = 0.107
+        static let shift2 = -0.253
+        static let clash = 0.063
+        static let keyUnknown = 0.032
+        static let sameArtist = 0.214
+        /// Per 6 dB of loudness difference, capped at 12 dB.
+        static let loudnessStep = -0.177
+    }
+
+    private static func loudness(_ track: TrackAnalysis) -> Double {
+        let levels = track.energy.filter { $0 > 0 }
+        guard !levels.isEmpty else { return -60 }
+        return 20 * log10(max(1e-6, Double(levels.reduce(0, +)) / Double(levels.count)))
+    }
+
     static func fit(_ a: TrackAnalysis, _ b: TrackAnalysis, sameArtist: Bool = false, keyMatch: Bool = true) -> Fit {
         var notes: [String] = []
+        var logit = 0.0
         // Tempo: the nearer the better; past what a beat-matched mix can stretch, no match at all.
         var tempo = 0.2
         if a.beatConfidence >= 0.5, b.beatConfidence >= 0.5, a.bpm > 0, b.bpm > 0 {
-            let gap = [1.0, 2.0, 0.5].map { abs(a.bpm / (b.bpm * $0) - 1) }.min() ?? 1
+            let readings = [1.0, 2.0, 0.5].map { (gap: abs(a.bpm / (b.bpm * $0) - 1), multiple: $0) }
+            let nearest = readings.min { $0.gap < $1.gap }!
+            let gap = nearest.gap
             tempo = gap <= MixPlanner.maxStretch ? 1 - 0.6 * gap / MixPlanner.maxStretch : 0
+            logit += Learned.tempoGap * min(gap, 0.24) / 0.12 + (gap > 0.12 ? Learned.tempoOver12 : 0) + (nearest.multiple != 1 ? Learned.halfDouble : 0)
             notes.append(String(format: "%.0f → %.0f BPM (%.0f %% apart)", a.bpm, b.bpm, gap * 100))
         } else {
+            logit += Learned.tempoFree
             notes.append("free tempo")
         }
         // Key: the same, relative or neighbouring key mixes as it is; a semitone or two away
@@ -62,20 +97,34 @@ enum MixSequencer {
             let (steps, sameMode) = wheel(a, b)
             if MixPlanner.harmonicallyCompatible(a, b) {
                 key = 1
+                logit += Learned.compatible
             } else if steps == 1, !sameMode {
                 // A diagonal move on the wheel (say 10A to 9B): most notes shared.
                 key = 0.75
+                logit += Learned.diagonal
             } else if keyMatch, [1, -1].contains(where: { MixPlanner.harmonicallyCompatible(a, b, shift: $0) }) {
                 key = 0.7
+                logit += Learned.shift1
             } else if keyMatch, [2, -2].contains(where: { MixPlanner.harmonicallyCompatible(a, b, shift: $0) }) {
                 key = 0.5
+                logit += Learned.shift2
             } else {
                 key = 0.15
+                logit += Learned.clash
             }
             notes.append("\(a.camelot) → \(b.camelot)")
+        } else {
+            logit += Learned.keyUnknown
         }
-        if sameArtist { notes.append("same artist") }
-        return Fit(tempo: tempo, key: key, sameArtist: sameArtist, total: 0.5 * tempo + 0.3 * key + (sameArtist ? 0.2 : 0), note: notes.joined(separator: ", "))
+        if sameArtist {
+            logit += Learned.sameArtist
+            notes.append("same artist")
+        }
+        logit += Learned.loudnessStep * min(12, abs(loudness(a) - loudness(b))) / 6
+        // As a probability, so it sits on the same 0 … 1 scale as the neutral score for songs not
+        // analysed yet and the small nudge that keeps Autoplay's own order in close calls.
+        let total = 1 / (1 + exp(-logit))
+        return Fit(tempo: tempo, key: key, sameArtist: sameArtist, total: total, note: notes.joined(separator: ", "))
     }
 
     /// Chains the pool greedily: the best fit for the playing song first, then the best fit
