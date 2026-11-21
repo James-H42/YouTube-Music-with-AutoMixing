@@ -676,6 +676,12 @@ final class AudioEngine: @unchecked Sendable {
 
     private func configure(format: AVAudioFormat) {
         lock.withLock { sampleRate = format.sampleRate }
+        // Bit-perfect output runs the device at this track's rate, before the engine starts on it.
+        if let device = OutputDevices.playbackDevice(chosen: outputDevice) {
+            BitPerfectOutput.shared.prepare(device: device, sourceRate: format.sampleRate, channels: Int(format.channelCount))
+        }
+        // Taking exclusive access can move the system default; keep the engine on our output.
+        _ = applyOutputDevice()
         guard connectedFormat != format || connectedStretch != wantsStretch else { return }
         if engine.isRunning { engine.stop() }
         if connectedFormat != nil {
@@ -712,6 +718,11 @@ final class AudioEngine: @unchecked Sendable {
         queue.async { [self] in
             outputDevice = id
             let position = currentTime
+            // Bit-perfect output sets the new output up (rate, format, exclusive access) and
+            // gives the previous one back, without waiting for the next song.
+            if let format = connectedFormat, let device = OutputDevices.playbackDevice(chosen: id) {
+                BitPerfectOutput.shared.prepare(device: device, sourceRate: format.sampleRate, channels: Int(format.channelCount))
+            }
             guard applyOutputDevice() else { return }
             masterEQ.refreshFormat()
             // The engine rebuilds its output on the new device; schedule again from here.
@@ -719,9 +730,12 @@ final class AudioEngine: @unchecked Sendable {
         }
     }
 
+    /// The device the engine's output is on right now (for the checks).
+    var currentOutputDevice: AudioDeviceID { engine.outputNode.auAudioUnit.deviceID }
+
     /// Points the engine's output at the chosen device. Returns true when that changed it.
     private func applyOutputDevice() -> Bool {
-        guard let target = outputDevice ?? OutputDevices.defaultOutput() else { return false }
+        guard let target = OutputDevices.playbackDevice(chosen: outputDevice) else { return false }
         let unit = engine.outputNode.auAudioUnit
         guard unit.deviceID != target else { return false }
         do { try unit.setDeviceID(target) } catch { return false }
@@ -755,6 +769,9 @@ final class AudioEngine: @unchecked Sendable {
 
     private func handleConfigurationChange() {
         // The output device changed; the engine has stopped and dropped what was scheduled.
+        // The engine may have moved itself to the system default (macOS moves the default
+        // away from a device that bit-perfect output holds): point it back at our output.
+        _ = applyOutputDevice()
         masterEQ.refreshFormat()
         guard media != nil, reader != nil else { return }
         let position = currentTime

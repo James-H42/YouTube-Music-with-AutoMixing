@@ -36,6 +36,12 @@ enum WindowTest {
                     try? await Task.sleep(for: .seconds(1.5))
                 }
             }
+            // METROLIST_WINDOWTEST_PUSH=1: open a page with a back button first (a concert
+            // page, which needs no network), to check the button doesn't show over the player.
+            if ProcessInfo.processInfo.environment["METROLIST_WINDOWTEST_PUSH"] == "1" {
+                AppModel.shared.push(.concert("windowtest"))
+                try? await Task.sleep(for: .seconds(1))
+            }
             report("normal")
             AppModel.shared.showExpandedPlayer = true
             try? await Task.sleep(for: .seconds(1.5))
@@ -83,7 +89,40 @@ enum WindowTest {
             if alpha < 0.05 { hidden = true }
             parts.append("\(name)=\(hidden ? "hidden" : "shown")\(button.isEnabled ? "" : ",disabled")")
         }
+        // Buttons drawn in the title bar besides the window's own three (a back button, say).
+        var titlebarButtons: [String] = []
+        if let frame = window.contentView?.superview {
+            func walk(_ view: NSView) {
+                if let button = view as? NSButton, !button.isHiddenOrHasHiddenAncestor,
+                   ![NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].contains(where: { window.standardWindowButton($0) === button }),
+                   button.convert(button.bounds, to: nil).minY > window.frame.height - 60 {
+                    var alpha = button.alphaValue
+                    var up = button.superview
+                    while let current = up { alpha *= current.alphaValue; up = current.superview }
+                    if alpha > 0.05 { titlebarButtons.append(button.accessibilityLabel() ?? button.title) }
+                }
+                for sub in view.subviews { walk(sub) }
+            }
+            walk(frame)
+        }
+        print("\(label): titlebar buttons=\(titlebarButtons)")
         print("\(label): \(parts.joined(separator: " ")) frame=\(Int(window.frame.width))x\(Int(window.frame.height))@\(Int(window.frame.minX)),\(Int(window.frame.minY)) resizable=\(window.styleMask.contains(.resizable)) toolbar=\(window.toolbar.map { $0.isVisible ? "visible" : "hidden" } ?? "none") title=\(window.titleVisibility == .hidden ? "hidden" : "shown") items=\((window.toolbar?.items ?? []).map { "\($0.itemIdentifier.rawValue)\($0.isHidden ? "[hidden]" : "")" })")
+        // METROLIST_WINDOWTEST_TREE=1: the views of the title bar area that draw something,
+        // to find what shows above the full-screen player.
+        if ProcessInfo.processInfo.environment["METROLIST_WINDOWTEST_TREE"] == "1", let frame = window.contentView?.superview {
+            func dump(_ view: NSView, depth: Int) {
+                guard depth < 14 else { return }
+                let inTitlebar = view.convert(view.bounds, to: nil).maxY > window.frame.height - 80
+                if inTitlebar || depth < 3 {
+                    let effect = (view as? NSVisualEffectView).map { " material=\($0.material.rawValue) state=\($0.state.rawValue)" } ?? ""
+                    let layer = view.layer.map { " layerBG=\($0.backgroundColor != nil) layerAlpha=\($0.opacity)" } ?? ""
+                    print(String(repeating: "  ", count: depth) + "\(type(of: view)) \(Int(view.frame.minX)),\(Int(view.frame.minY)) \(Int(view.frame.width))x\(Int(view.frame.height))\(view.isHidden ? " HIDDEN" : "") alpha=\(view.alphaValue)\(effect)\(layer)")
+                }
+                for sub in view.subviews { dump(sub, depth: depth + 1) }
+            }
+            print("— view tree (\(label)) —")
+            dump(frame, depth: 0)
+        }
         // A picture of the whole window frame, title bar included, for checking by eye.
         if let frame = window.contentView?.superview, let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) {
             frame.cacheDisplay(in: frame.bounds, to: rep)

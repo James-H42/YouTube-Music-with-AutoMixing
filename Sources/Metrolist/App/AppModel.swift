@@ -4,7 +4,7 @@ import Security
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case home, explore, sharedQueue
+    case home, explore, concerts, sharedQueue
     case liked, downloads, musicVideos, albums, artists, savedPlaylists, history
     case localPlaylist(String)
     case remotePlaylist(String)
@@ -16,6 +16,7 @@ enum Route: Hashable {
     case playlist(String)
     case browse(BrowseEndpoint, title: String)
     case search(String)
+    case concert(String)
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -102,8 +103,9 @@ final class AccountStore {
         if let data = try? Data(contentsOf: sessionFile), let cookie = String(data: data, encoding: .utf8), !cookie.isEmpty {
             return cookie
         }
-        // One-time move of a session saved by an earlier build.
-        guard !UserDefaults.standard.bool(forKey: "sessionMigrated") else { return nil }
+        // One-time move of a session saved by an earlier build. Never in a test run, which
+        // must not read the real Keychain.
+        guard !Keychain.isTestRun, !UserDefaults.standard.bool(forKey: "sessionMigrated") else { return nil }
         UserDefaults.standard.set(true, forKey: "sessionMigrated")
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

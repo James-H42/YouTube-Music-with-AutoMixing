@@ -368,6 +368,9 @@ final class LibraryStore {
         data.playCounts.sorted { $0.value > $1.value }.prefix(50).compactMap { data.songs[$0.key] }
     }
 
+    /// How often each song has been played, by song id.
+    var playCounts: [String: Int] { data.playCounts }
+
     func recordPlay(_ song: Song) {
         remember([song])
         data.history.insert(HistoryEntry(songId: song.id, date: Date()), at: 0)

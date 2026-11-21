@@ -54,6 +54,7 @@ struct SidebarView: View {
             Section {
                 row("Home", "house", SidebarItem.home)
                 row("Explore", "safari", SidebarItem.explore)
+                row("Concerts", "ticket", SidebarItem.concerts)
                 row("Shared Queue", "person.2.wave.2", SidebarItem.sharedQueue, badge: DeviceConnect.guests.connected.count)
             }
 
@@ -156,6 +157,9 @@ struct RootView: View {
                     .navigationDestination(for: Route.self) { route in
                         destination(for: route)
                             .safeAreaInset(edge: .bottom, spacing: 0) { PlayerBarInset() }
+                            // The full-screen player and the video player cover the page, but the
+                            // page's back button lives in the title bar above them: hide it there.
+                            .navigationBarBackButtonHidden(model.showExpandedPlayer)
                     }
             }
         }
@@ -231,6 +235,7 @@ struct RootView: View {
         case .playlist(let id): PlaylistView(playlistId: id)
         case .browse(let endpoint, let title): BrowseView(endpoint: endpoint, title: title)
         case .search(let query): SearchView(query: query)
+        case .concert(let id): ConcertDetailView(id: id)
         }
     }
 
@@ -241,6 +246,8 @@ struct RootView: View {
             HomeView()
         case .explore:
             ExploreView()
+        case .concerts:
+            ConcertsView()
         case .sharedQueue:
             SharedQueueView()
                 .navigationTitle("Shared Queue")

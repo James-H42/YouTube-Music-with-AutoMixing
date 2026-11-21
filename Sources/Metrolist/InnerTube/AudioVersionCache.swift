@@ -6,9 +6,15 @@ import Foundation
 actor AudioVersionCache {
     static let shared = AudioVersionCache()
 
+    /// Raised when the matching finds releases it used to miss, so earlier "none" answers
+    /// are asked again. 2: album track lists and the artist's page (2026-11-21).
+    static let matcherVersion = 2
+
     private struct Entry: Codable {
         var audio: Song?
         var date: Date
+        /// The matcher that gave a "none"; nil for answers saved before versions were kept.
+        var matcher: Int?
     }
 
     private var entries: [String: Entry]?
@@ -21,7 +27,10 @@ actor AudioVersionCache {
         if let entries { return entries }
         var loaded = (try? JSONDecoder().decode([String: Entry].self, from: Data(contentsOf: file))) ?? [:]
         let now = Date()
-        loaded = loaded.filter { now.timeIntervalSince($0.value.date) < ($0.value.audio == nil ? 3 : 30) * 86_400 }
+        loaded = loaded.filter { entry in
+            if entry.value.audio == nil, (entry.value.matcher ?? 1) < Self.matcherVersion { return false }
+            return now.timeIntervalSince(entry.value.date) < (entry.value.audio == nil ? 3 : 30) * 86_400
+        }
         entries = loaded
         return loaded
     }
@@ -36,7 +45,7 @@ actor AudioVersionCache {
 
     func store(_ answers: [String: Song?]) {
         var all = load()
-        for (id, audio) in answers { all[id] = Entry(audio: audio, date: Date()) }
+        for (id, audio) in answers { all[id] = Entry(audio: audio, date: Date(), matcher: Self.matcherVersion) }
         // Bounded: the oldest answers go first.
         if all.count > 20_000 {
             for key in all.sorted(by: { $0.value.date < $1.value.date }).prefix(all.count - 20_000).map(\.key) { all[key] = nil }

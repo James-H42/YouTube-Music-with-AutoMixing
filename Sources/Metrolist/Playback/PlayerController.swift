@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Observation
 
@@ -46,9 +47,79 @@ final class PlayerController {
     var sleepTimerEnd: Date?
     var volume: Double {
         didSet {
-            engine.volume = Float(volume)
-            settings.volume = volume
+            if let device = deviceVolumeTarget {
+                // Bit-perfect: the output's own volume sets the level; the samples stay as decoded.
+                engine.volume = 1
+                if !adoptingDeviceVolume, abs(Double(AudioDeviceControl.hardwareVolume(device) ?? -1) - volume) > 0.001 {
+                    AudioDeviceControl.setHardwareVolume(device, Float(volume))
+                }
+            } else {
+                engine.volume = Float(volume)
+                settings.volume = volume
+            }
         }
+    }
+
+    /// With bit-perfect output on an output that has its own volume, that volume: the slider
+    /// sets it and follows it (the volume keys change it too). Nil: the app's own volume.
+    @ObservationIgnored private var deviceVolumeTarget: AudioDeviceID?
+    @ObservationIgnored private var deviceVolumeListener: (AudioDeviceID, AudioObjectPropertyListenerBlock)?
+    @ObservationIgnored private var adoptingDeviceVolume = false
+    /// The bit-perfect setting the volume and the playing song were last set up for.
+    @ObservationIgnored private var routedBitPerfect: Bool?
+
+    /// Chooses where the volume slider acts, after bit-perfect output or the output changed.
+    func updateVolumeRouting() {
+        let device = settings.bitPerfect ? OutputDevices.playbackDevice(chosen: OutputDevices.shared.selectedID) : nil
+        let target = device.flatMap { AudioDeviceControl.hasHardwareVolume($0) ? $0 : nil }
+        guard target != deviceVolumeTarget else { return }
+        if let (old, block) = deviceVolumeListener { AudioDeviceControl.removeVolumeListener(old, block) }
+        deviceVolumeListener = nil
+        deviceVolumeTarget = target
+        if let target {
+            adoptVolume(AudioDeviceControl.hardwareVolume(target).map(Double.init) ?? volume)
+            if let block = AudioDeviceControl.addVolumeListener(target, { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.deviceVolumeTarget == target, let level = AudioDeviceControl.hardwareVolume(target) else { return }
+                    if abs(Double(level) - self.volume) > 0.001 { self.adoptVolume(Double(level)) }
+                }
+            }) {
+                deviceVolumeListener = (target, block)
+            }
+        } else {
+            // Back to the app's own level, as it was before.
+            adoptVolume(settings.volume)
+        }
+    }
+
+    private func adoptVolume(_ level: Double) {
+        adoptingDeviceVolume = true
+        volume = level
+        adoptingDeviceVolume = false
+    }
+
+    /// The stages in the app that change the samples right now, for the signal path.
+    var processingStages: [String] {
+        var stages: [String] = []
+        if MasterEQ.shared.enabled, !MasterEQ.shared.bypassed, !MasterEQ.shared.profile.isFlat { stages.append("Equalizer") }
+        if !MasterEQ.shared.bypassed, MasterEQ.shared.boostsLevel || (MasterEQ.shared.enabled && MasterEQ.shared.profile.addsGain) { stages.append("Limiter") }
+        if settings.normalizes { stages.append("Loudness normalisation") }
+        if autoMixActive { stages.append("AutoMix") }
+        return stages
+    }
+
+    /// The app's own gain on the samples (1 when the output's volume is used instead).
+    var appGain: Double { deviceVolumeTarget == nil ? volume : 1 }
+
+    /// Bit-perfect output was switched: hands the playing song to the engine again where it
+    /// is, so loudness normalisation and the AutoMix stretcher come in or out of its path at
+    /// once rather than from the next song.
+    func reapplyOutputMode() {
+        updateVolumeRouting()
+        guard !needsLoad, mixActivity == nil, let song = currentSong, status != .idle else { return }
+        engine.load(media.open(videoId: song.id), startAt: currentTime, autoplay: isPlaying, normalize: settings.normalizes, mixReady: autoMixActive)
+        // The next song is handed over again for the new path.
+        gaplessKey = nil
     }
 
     /// The level to return to when unmuting.
@@ -137,7 +208,12 @@ final class PlayerController {
         }
         // Play through the output chosen last time, and follow later choices.
         engine.setOutputDevice(OutputDevices.shared.selectedID)
-        OutputDevices.shared.onChange = { [weak self] id in self?.engine.setOutputDevice(id) }
+        OutputDevices.shared.onChange = { [weak self] id in
+            self?.engine.setOutputDevice(id)
+            self?.updateVolumeRouting()
+        }
+        updateVolumeRouting()
+        routedBitPerfect = settings.bitPerfect
         nowPlaying = NowPlayingBridge(player: self)
         if let data = try? Data(contentsOf: AppPaths.mixes), let saved = try? JSONDecoder().decode([String: MixPlan].self, from: data) {
             // Earlier versions saved a proposal as soon as it was picked to be heard. Those were
@@ -193,7 +269,7 @@ final class PlayerController {
     var autoMixAvailable: Bool { settings.mixAlbums || !isAlbumSequence }
 
     /// AutoMix is on and applies to what is playing.
-    var autoMixActive: Bool { settings.autoMix && autoMixAvailable }
+    var autoMixActive: Bool { settings.mixes && autoMixAvailable }
 
     /// A video next in the queue may still be swapped for its audio release when it starts
     /// (Settings → "Prefer audio versions"). Until the lookup has answered, nobody knows which
@@ -256,7 +332,7 @@ final class PlayerController {
 
     /// The pair AutoMix would mix next, if there is one.
     var mixPair: (current: Song, next: Song)? {
-        guard settings.autoMix, let current = currentSong, let next = nextSong, mixEligible(current, next) else { return nil }
+        guard settings.mixes, let current = currentSong, let next = nextSong, mixEligible(current, next) else { return nil }
         return (current, next)
     }
 
@@ -522,7 +598,7 @@ final class PlayerController {
     func isAutoQueued(_ id: String) -> Bool { autoQueued[id] != nil }
 
     /// AutoMix is choosing the order of the songs Autoplay lines up.
-    private var sequencesAutoQueue: Bool { settings.autoMix && settings.mixOrdersQueue && settings.mixStyle == .smart }
+    private var sequencesAutoQueue: Bool { settings.mixes && settings.mixOrdersQueue && settings.mixStyle == .smart }
 
     /// Looks a few Autoplay songs ahead, has them fetched and analysed, and moves the one that
     /// mixes best out of the playing song to the front (`MixSequencer`).
@@ -572,7 +648,7 @@ final class PlayerController {
     /// Fetches, analyses and plans the current and next tracks in the background.
     private func prepareMix() {
         sequenceAutoQueue()
-        guard settings.autoMix, let current = currentSong else { return }
+        guard settings.mixes, let current = currentSong else { return }
         resolveNextAudioVersion()
         let next = nextSong.flatMap { mixEligible(current, $0) ? $0 : nil }
         // A transition that was only being tried out does not outlive its pair of songs.
@@ -1062,7 +1138,7 @@ final class PlayerController {
             let opened = media.open(videoId: song.id)
             // A track that may be mixed out of goes through the time-stretcher from the start,
             // so its tempo can glide during the transition without a break in the sound.
-            engine.load(opened, startAt: startPosition, autoplay: isPlaying, normalize: settings.normalizeVolume, mixReady: autoMixActive)
+            engine.load(opened, startAt: startPosition, autoplay: isPlaying, normalize: settings.normalizes, mixReady: autoMixActive)
         }
     }
 
@@ -1182,6 +1258,11 @@ final class PlayerController {
     }
 
     private func tick() {
+        // Bit-perfect output switched (in Settings, or by a restored backup): apply it now.
+        if routedBitPerfect != settings.bitPerfect {
+            routedBitPerfect = settings.bitPerfect
+            reapplyOutputMode()
+        }
         guard currentSong != nil else { return }
         if !needsLoad {
             let time = engine.currentTime
@@ -1229,7 +1310,7 @@ final class PlayerController {
         }
         if key != gaplessKey {
             gaplessKey = key
-            engine.enqueueNext(key == nil ? nil : media.open(videoId: queue[currentIndex + 1].id), plan: plan, normalize: settings.normalizeVolume)
+            engine.enqueueNext(key == nil ? nil : media.open(videoId: queue[currentIndex + 1].id), plan: plan, normalize: settings.normalizes)
         }
         extendQueueIfNeeded()
     }

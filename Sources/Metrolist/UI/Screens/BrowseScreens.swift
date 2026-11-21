@@ -170,7 +170,6 @@ struct SearchView: View {
 struct AlbumView: View {
     let browseId: String
     @Environment(AppModel.self) private var model
-    @ViewState private var filter = ""
     /// Apple Music's animated cover for this album, when that setting is on and one exists.
     @ViewState private var motion: URL?
 
@@ -192,13 +191,8 @@ struct AlbumView: View {
                     ) {
                         CollectionActions(item: .album(page.album), songs: page.songs)
                     }
-                    let text = filter.trimmingCharacters(in: .whitespaces)
-                    if page.songs.count > 1 {
-                        FilterField(text: $filter, shown: page.songs.filter { $0.matchesFilter(text) }.count, total: page.songs.count)
-                            .padding(.horizontal, 24)
-                    }
-                    // Track numbers are hidden while filtering: they would no longer be the album's.
-                    SongList(songs: text.isEmpty ? page.songs : page.songs.filter { $0.matchesFilter(text) }, numbered: text.isEmpty, showArtwork: false, showAlbum: false)
+                    // No filter field here: albums, EPs and singles are short. Playlists have one.
+                    SongList(songs: page.songs, numbered: true, showArtwork: false, showAlbum: false)
                         .padding(.horizontal, 14)
                     if let description = page.description, !description.isEmpty {
                         Text(description)
@@ -379,6 +373,7 @@ struct ArtistView: View {
                             .frame(maxWidth: 720, alignment: .leading)
                             .padding(.horizontal, 24)
                     }
+                    ArtistConcertsSection(artist: ConcertArtist(name: page.artist.title, channelId: browseId.hasPrefix("UC") ? browseId : nil, thumbnail: page.artist.thumbnail))
                     SectionsView(sections: page.sections)
                 }
                 .padding(.bottom, 16)

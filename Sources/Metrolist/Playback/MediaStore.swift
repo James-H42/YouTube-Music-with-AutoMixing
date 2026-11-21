@@ -276,6 +276,52 @@ final class MediaStore {
 
     var downloadedBytes: Int64 { records.values.filter(\.pinned).reduce(0) { $0 + $1.bytes } }
     var cacheBytes: Int64 { records.values.filter { !$0.pinned }.reduce(0) { $0 + $1.bytes } }
+
+    // MARK: - Storage by kind
+
+    /// How many files of one kind are stored, and their size.
+    struct StorageUse: Equatable {
+        var count = 0
+        var bytes: Int64 = 0
+        mutating func add(_ record: MediaRecord) { count += 1; bytes += record.bytes }
+    }
+
+    /// Storage split the way the app lists it: songs (Downloads) apart from the sound of music
+    /// videos (Music Videos), each downloaded or cached.
+    struct StorageSplit: Equatable {
+        var downloadedSongs = StorageUse()
+        var downloadedVideoSound = StorageUse()
+        var cachedSongs = StorageUse()
+        var cachedVideoSound = StorageUse()
+    }
+
+    /// Whether a stored sound is a music video's: a download listed under Music Videos, or a
+    /// cached one that YouTube Music types as a music video.
+    private func isVideoSound(_ record: MediaRecord) -> Bool {
+        record.pinned ? isVideoDownload(record.videoId) : (VideoDownloads.shared.isDownloaded(record.videoId) || songProvider?(record.videoId)?.isMusicVideo == true)
+    }
+
+    var storage: StorageSplit {
+        var split = StorageSplit()
+        for record in records.values {
+            switch (record.pinned, isVideoSound(record)) {
+            case (true, false): split.downloadedSongs.add(record)
+            case (true, true): split.downloadedVideoSound.add(record)
+            case (false, false): split.cachedSongs.add(record)
+            case (false, true): split.cachedVideoSound.add(record)
+            }
+        }
+        return split
+    }
+
+    /// Clears the cached sound of songs only, or of music videos only. Downloads are kept.
+    func clearCache(musicVideos: Bool) {
+        for record in records.values where !record.pinned && record.videoId != protectedId && isVideoSound(record) == musicVideos {
+            try? FileManager.default.removeItem(at: AppPaths.media.appendingPathComponent(record.fileName))
+            records[record.videoId] = nil
+        }
+        scheduleSave()
+    }
     var activeDownloadCount: Int { queued.count + pinRequested.intersection(active.keys).count }
 
     // MARK: - Playback

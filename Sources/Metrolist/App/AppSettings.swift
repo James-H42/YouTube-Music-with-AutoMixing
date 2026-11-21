@@ -55,6 +55,17 @@ final class AppSettings {
     /// Shows the playing song as a Discord activity, through the Discord app on this Mac.
     var discordPresence: Bool { didSet { defaults.set(discordPresence, forKey: "discordPresence"); DiscordPresence.shared.setEnabled(discordPresence) } }
 
+    /// Bit-perfect output: the output runs at the song's own sample rate and nothing in the app
+    /// changes the samples (no equaliser, limiter, loudness normalisation or AutoMix).
+    var bitPerfect: Bool { didSet { defaults.set(bitPerfect, forKey: "bitPerfect"); applyOutput() } }
+    /// With bit-perfect output, keep the output for this app alone (Core Audio's hog mode).
+    var exclusiveOutput: Bool { didSet { defaults.set(exclusiveOutput, forKey: "exclusiveOutput"); applyOutput() } }
+
+    /// AutoMix is on and not paused by bit-perfect output.
+    var mixes: Bool { autoMix && !bitPerfect }
+    /// Loudness normalisation is on and not bypassed by bit-perfect output.
+    var normalizes: Bool { normalizeVolume && !bitPerfect }
+
     var mixOptions: MixOptions { MixOptions(length: mixLength, style: mixStyle, keyMatch: mixKeyMatch) }
 
     @ObservationIgnored private let defaults = UserDefaults.standard
@@ -103,7 +114,10 @@ final class AppSettings {
         animatedAlbumCovers = defaults.bool(forKey: "animatedAlbumCovers")
         hideOriginalLyrics = defaults.bool(forKey: "hideOriginalLyrics")
         discordPresence = defaults.bool(forKey: "discordPresence")
+        bitPerfect = defaults.bool(forKey: "bitPerfect")
+        exclusiveOutput = defaults.bool(forKey: "exclusiveOutput")
         applySound()
+        applyOutput()
         // Observers don't run during init.
         if discordPresence { DiscordPresence.shared.setEnabled(true) }
     }
@@ -113,5 +127,10 @@ final class AppSettings {
         Normalization.allowsBoost = normalizationBoost
         // Raising a quiet track, or a loud target, can push the sum past full scale.
         MasterEQ.shared.boostsLevel = normalizationBoost || normalizationLevel == .loud
+    }
+
+    private func applyOutput() {
+        MasterEQ.shared.bypassed = bitPerfect
+        BitPerfectOutput.shared.configure(enabled: bitPerfect, exclusive: exclusiveOutput)
     }
 }

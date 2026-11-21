@@ -161,6 +161,100 @@ enum AutoEQ {
     }
 }
 
+// MARK: - AutoEQ headphone search
+
+/// The AutoEq project's catalogue of measured headphones, searched by name as LastWave does:
+/// its `results/INDEX.md` is downloaded once from GitHub and refreshed every two weeks, and
+/// choosing a headphone downloads that one `ParametricEQ.txt`. Nothing about the listener is
+/// sent; the copy on disk is used offline.
+extension AutoEQ {
+    /// One measured headphone, as the index lists it.
+    struct Entry: Identifiable, Hashable {
+        var name: String
+        /// Who measured it (oratory1990, crinacle…), and on which rig.
+        var source: String
+        var rig: String?
+        /// Its folder below `results/`, percent-encoded as in the index.
+        var path: String
+
+        var id: String { path }
+        var subtitle: String { rig.map { "\(source) on \($0)" } ?? source }
+        var isInEar: Bool {
+            let folder = (path.removingPercentEncoding ?? path).lowercased()
+            return folder.contains("in-ear") || folder.contains("earbud")
+        }
+        var profileAddress: String {
+            let folder = path.split(separator: "/").last.map(String.init) ?? ""
+            return "\(AutoEQ.resultsAddress)/\(path)/\(folder)%20ParametricEQ.txt"
+        }
+    }
+
+    static let resultsAddress = "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results"
+    private static let indexMaxBytes = 8 * 1024 * 1024
+    private static var indexFile: URL { AppPaths.root.appendingPathComponent("autoeq-index.md") }
+
+    /// "- [Sennheiser HD 600](./oratory1990/over-ear/Sennheiser%20HD%20600) by oratory1990"
+    static func parseIndex(_ markdown: String) -> [Entry] {
+        guard let line = try? NSRegularExpression(pattern: #"^- \[(.+)\]\(\./(.+)\) by (.+?)(?: on (.+))?\s*$"#) else { return [] }
+        return markdown.split(whereSeparator: \.isNewline).compactMap { raw in
+            let text = String(raw)
+            guard let match = line.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+            func group(_ index: Int) -> String? {
+                Range(match.range(at: index), in: text).map { String(text[$0]).trimmingCharacters(in: .whitespaces) }
+            }
+            guard let name = group(1), let path = group(2), let source = group(3), !path.contains("..") else { return nil }
+            return Entry(name: name, source: source, rig: group(4).flatMap { $0.isEmpty ? nil : $0 }, path: path)
+        }
+    }
+
+    /// Headphones whose name, measurer or rig contain every word of the query; those whose
+    /// name starts with the first word first, then shorter names.
+    static func search(_ entries: [Entry], _ query: String, limit: Int = 200) -> [Entry] {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let first = words.first else { return [] }
+        return entries
+            .filter { entry in
+                let text = "\(entry.name) \(entry.source) \(entry.rig ?? "")".lowercased()
+                return words.allSatisfy { text.contains($0) }
+            }
+            .sorted { a, b in
+                let aStarts = a.name.lowercased().hasPrefix(first), bStarts = b.name.lowercased().hasPrefix(first)
+                if aStarts != bStarts { return aStarts }
+                if a.name.count != b.name.count { return a.name.count < b.name.count }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// The catalogue: the copy on disk while it is under two weeks old, otherwise a fresh one
+    /// (falling back to the old copy when GitHub can't be reached).
+    static func catalog() async throws -> [Entry] {
+        let file = indexFile
+        let age = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) }
+        if let age, age < 14 * 86_400, let text = try? String(contentsOf: file, encoding: .utf8) {
+            let entries = parseIndex(text)
+            if !entries.isEmpty { return entries }
+        }
+        do {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 30
+            let (data, response) = try await URLSession(configuration: configuration).data(from: URL(string: "\(resultsAddress)/INDEX.md")!)
+            guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= indexMaxBytes, let text = String(data: data, encoding: .utf8) else { throw EQError.notFound }
+            let entries = parseIndex(text)
+            guard !entries.isEmpty else { throw EQError.notFound }
+            try? data.write(to: file, options: .atomic)
+            return entries
+        } catch {
+            if let text = try? String(contentsOf: file, encoding: .utf8) {
+                let entries = parseIndex(text)
+                if !entries.isEmpty { return entries }
+            }
+            throw error
+        }
+    }
+}
+
 // MARK: - Response curve
 
 enum EQMath {
@@ -320,6 +414,9 @@ final class MasterEQ {
     private(set) var saved: [EQProfile]
     /// Set when loudness normalisation may add gain, so the limiter is on even for a flat profile.
     var boostsLevel = false { didSet { changed(save: false) } }
+    /// Bit-perfect output is on: the equaliser and limiter stay out of the signal path,
+    /// whatever the profile, and come back as they were when it is turned off.
+    var bypassed = false { didSet { if bypassed != oldValue { changed(save: false) } } }
 
     typealias Applier = @Sendable (EQProfile, Bool, Bool) -> Void
     @ObservationIgnored private var appliers: [Applier] = []
@@ -350,7 +447,7 @@ final class MasterEQ {
     /// owns that engine's graph.
     func register(_ apply: @escaping Applier) {
         appliers.append(apply)
-        apply(profile, enabled, boostsLevel)
+        apply(profile, enabled && !bypassed, boostsLevel && !bypassed)
     }
 
     func choose(_ preset: EQProfile) {
@@ -386,7 +483,7 @@ final class MasterEQ {
     }
 
     private func changed(save: Bool = true) {
-        for apply in appliers { apply(profile, enabled, boostsLevel) }
+        for apply in appliers { apply(profile, enabled && !bypassed, boostsLevel && !bypassed) }
         if save { persist() }
     }
 

@@ -324,8 +324,8 @@ enum YTMusic {
         // When the item names its album, the album's own track list is authoritative: it is
         // the distributor's audio for exactly that edition (explicit or clean).
         if let albumId = song.album?.id, let page = try? await album(albumId) {
-            let wanted = normalized(baseTitle(song.title))
-            if let track = page.songs.first(where: { normalized(baseTitle($0.title)) == wanted }), track.id != song.id {
+            let rule = AudioMatchRule(song)
+            if let track = page.songs.first(where: { rule.sameTitle($0) }), track.id != song.id {
                 return track
             }
         }
@@ -336,40 +336,220 @@ enum YTMusic {
         return await searchedAudioVersion(for: song, strictLength: strictLength)
     }
 
+    /// The searches tried for a video's audio release: its bare title with the artist (the one
+    /// named in an "Artist - Song" title, or the uploader). The first is the songs search.
+    static func audioSearchQueries(for song: Song) -> [String] {
+        // Uploads titled "Artist - Song" name the real artist in the title, not as the uploader.
+        let unbracketed = song.title.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
+        let titleArtist = unbracketed.range(of: " - ").map { String(unbracketed[..<$0.lowerBound]) }
+        let parts = titleParts(song.title, artists: song.artists.map(\.name) + (titleArtist.map { [$0] } ?? []))
+        // "スパークル - Sparkle", "Title / Artist - English title / Artist": search with the
+        // part after the dash, as before, once the artist credits are gone.
+        let title = parts.last ?? baseTitle(song.title)
+        let artist = song.artists.first?.name ?? titleArtist
+        return [[title, artist].compactMap { $0 }.joined(separator: " "), title]
+    }
+
+    /// The parts of a title that can each be the song's name: the halves of "スパークル -
+    /// Sparkle", the titles of "ずうっといっしょ！ / キタニタツヤ - ALWAYS BE WITH YOU XD /
+    /// Tatsuya Kitani" once the artist credits are dropped, and the text inside 「」 or 『』.
+    /// Bracketed decorations ("[Official Music Video]") and featured artists are left out.
+    static func titleParts(_ title: String, artists: [String]) -> [String] {
+        var text = title
+        var quoted: [String] = []
+        if let pattern = try? NSRegularExpression(pattern: "[「『]([^」』]+)[」』]") {
+            let range = NSRange(text.startIndex..., in: text)
+            for match in pattern.matches(in: text, range: range) {
+                if let inner = Range(match.range(at: 1), in: text) { quoted.append(String(text[inner])) }
+            }
+            text = pattern.stringByReplacingMatches(in: text, range: range, withTemplate: " - $1 - ")
+        }
+        text = text.replacingOccurrences(of: #"\s*[\(\[【〔][^\)\]】〕]*[\)\]】〕]"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\s+(feat\.?|ft\.?|featuring)\s[^-/|]*"#, with: " ", options: [.regularExpression, .caseInsensitive])
+        let artistKeys = Set(artists.map(normalized).filter { !$0.isEmpty })
+        let decorations: Set<String> = ["officialmusicvideo", "officialvideo", "musicvideo", "mv", "officialmv", "lyricvideo", "officiallyricvideo", "officialaudio", "audio", "visualizer", "officialvisualizer", "video"]
+        // " / " and "|" separate a title from its artist ("Title / Artist - English title /
+        // Artist") only when a part is the artist; otherwise they join two songs of a medley
+        // ("Around the World / Harder, Better, Faster, Stronger") and stay in the title.
+        let slashSplit: (String) -> [String] = { piece in
+            piece.components(separatedBy: CharacterSet(charactersIn: "|｜／")).flatMap { $0.components(separatedBy: " / ") }
+        }
+        let dashParts = text.components(separatedBy: " - ").flatMap { $0.components(separatedBy: " – ") }
+        let credited = dashParts.contains { part in
+            slashSplit(part).dropFirst().contains { artistKeys.contains(normalized($0)) }
+        }
+        var parts: [String] = []
+        for piece in credited ? dashParts.flatMap(slashSplit) : dashParts {
+            let trimmed = piece.trimmingCharacters(in: .whitespaces)
+            let key = normalized(trimmed)
+            guard !key.isEmpty, !artistKeys.contains(key), !decorations.contains(key), !parts.contains(trimmed) else { continue }
+            parts.append(trimmed)
+        }
+        for inner in quoted where !parts.contains(inner) { parts.append(inner) }
+        // "Song - Remastered 2011", "Song - Radio Edit": the second half names the version, not
+        // the song, and two songs of one artist must not match on it.
+        let descriptor = #"(?i)\b(remaster(ed)?|version|ver\.?|edit|mix|mono|stereo|live|acoustic|instrumental|demo|bonus|deluxe|anniversary|soundtrack|ost|tv size|from|theme|opening|ending)\b"#
+        let named = parts.filter { $0.range(of: descriptor, options: .regularExpression) == nil }
+        return named.isEmpty ? parts : named
+    }
+
+    /// Normalised forms of a title's parts, plus their Latin reading for titles in Japanese
+    /// or Korean script, so "正解" can find a release listed as "Seikai".
+    static func titleKeys(_ title: String, artists: [String]) -> Set<String> {
+        var keys: Set<String> = []
+        for part in titleParts(title, artists: artists) {
+            let key = normalized(part)
+            if key.count >= 2 || key.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { keys.insert(key) }
+            guard Romanizer.needsRomanization(part) else { continue }
+            let japanese = part.unicodeScalars.contains { (0x3040 ... 0x30FF).contains($0.value) || (0x4E00 ... 0x9FFF).contains($0.value) }
+            if let reading = Romanizer.romanize(part, language: japanese ? .japanese : nil) {
+                let latin = normalized(reading)
+                if latin.count >= 3 { keys.insert(latin) }
+            }
+        }
+        return keys
+    }
+
+    /// What a candidate must share with the video: the bare title, the version (live,
+    /// remix…) and an artist.
+    private struct AudioMatchRule {
+        let title: String
+        let keys: Set<String>
+        let variant: Set<String>
+        let artists: [String]
+        let titleBlob: String
+
+        init(_ song: Song) {
+            title = YTMusic.normalized(YTMusic.baseTitle(song.title))
+            keys = YTMusic.titleKeys(song.title, artists: song.artists.map(\.name))
+            variant = YTMusic.variantKeywords(song.title)
+            artists = song.artists.map { YTMusic.normalized($0.name) }.filter { !$0.isEmpty }
+            titleBlob = YTMusic.normalized(song.title)
+        }
+
+        /// The same title, in any of the forms `titleKeys` gives, and the same version.
+        func sameTitle(_ candidate: Song) -> Bool {
+            guard YTMusic.variantKeywords(candidate.title) == variant else { return false }
+            if !title.isEmpty, YTMusic.normalized(YTMusic.baseTitle(candidate.title)) == title { return true }
+            return !keys.isDisjoint(with: YTMusic.titleKeys(candidate.title, artists: candidate.artists.map(\.name)))
+        }
+
+        func sameSong(_ candidate: Song) -> Bool {
+            !candidate.isVideo && sameTitle(candidate)
+        }
+
+        /// The uploader of a video isn't always the artist, so an artist named in its title counts too.
+        func sameArtist(_ names: [String]) -> Bool {
+            names.map(YTMusic.normalized).contains { artist in
+                !artist.isEmpty && (artists.contains { $0.contains(artist) || artist.contains($0) } || titleBlob.contains(artist))
+            }
+        }
+    }
+
     /// The audio release of a music video found by searching YouTube Music's songs: one
     /// request. The title (without decorations), the version (live, remix…) and an artist
     /// must agree, and the length must be within 20 seconds of the video's.
     ///
     /// With `strictLength` off (playlists), a release whose length differs more is still
     /// taken when nothing closer matches: music videos often add intros or skits.
+    ///
+    /// The songs search leaves some releases out entirely (RADWIMPS' "DASAI DAZAI" is never
+    /// listed, though its album is). When it finds nothing, the albums the general search
+    /// shows for the title, then the artist's own page, are looked through.
     static func searchedAudioVersion(for song: Song, strictLength: Bool = true) async -> Song? {
         guard song.isVideo else { return nil }
-        // Uploads titled "Artist - Song" name the real artist in the title, not as the uploader.
-        let unbracketed = song.title.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
-        let titleArtist = unbracketed.range(of: " - ").map { String(unbracketed[..<$0.lowerBound]) }
-        let query = ([baseTitle(song.title)] + (titleArtist.map { [$0] } ?? song.artists.prefix(1).map(\.name))).joined(separator: " ")
-        guard let results = try? await search(query, filter: .songs) else { return nil }
-        let wantedTitle = normalized(baseTitle(song.title))
-        let wantedArtists = song.artists.map { normalized($0.name) }.filter { !$0.isEmpty }
-        let titleBlob = normalized(song.title)
-        let wantedVariant = variantKeywords(song.title)
-        guard !wantedTitle.isEmpty else { return nil }
-
-        let matches = results.sections.flatMap(\.items).compactMap(\.song).prefix(8).filter { candidate in
-            guard !candidate.isVideo,
-                  normalized(baseTitle(candidate.title)) == wantedTitle,
-                  variantKeywords(candidate.title) == wantedVariant
-            else { return false }
-            // The uploader of a video isn't always the artist, so also accept an artist named in its title.
-            return candidate.artists.map { normalized($0.name) }.contains { artist in
-                !artist.isEmpty && (wantedArtists.contains { $0.contains(artist) || artist.contains($0) } || titleBlob.contains(artist))
-            }
+        let rule = AudioMatchRule(song)
+        guard !rule.title.isEmpty || !rule.keys.isEmpty else { return nil }
+        let query = audioSearchQueries(for: song)[0]
+        let results = try? await search(query, filter: .songs)
+        let matches = (results?.sections.flatMap(\.items).compactMap(\.song) ?? []).prefix(8).filter { candidate in
+            rule.sameSong(candidate) && rule.sameArtist(candidate.artists.map(\.name))
         }
-        guard let length = song.duration else { return matches.first }
+        // Another arrangement ("18FES ver.") is kept in reserve while the album and artist
+        // pages are looked through for the plain release.
+        let videoTags = versionTags(song.title)
+        let isPlain: (Song) -> Bool = { versionTags($0.title).isSubset(of: videoTags) }
+        var reserve: Song?
+        if let found = bestAudioMatch(Array(matches), for: song, strictLength: strictLength) {
+            if isPlain(found) { return found }
+            reserve = found
+        }
+        if let found = await albumListedAudioVersion(for: song, rule: rule, strictLength: strictLength) {
+            if isPlain(found) { return found }
+            reserve = reserve ?? found
+        }
+        if let found = await artistListedAudioVersion(for: song, rule: rule, strictLength: strictLength), isPlain(found) || reserve == nil {
+            return found
+        }
+        return reserve
+    }
+
+    /// Looks through the track lists of the albums YouTube Music's general search lists for
+    /// the title (at most three, by the video's artist).
+    private static func albumListedAudioVersion(for song: Song, rule: AudioMatchRule, strictLength: Bool) async -> Song? {
+        var albums: [AlbumItem] = []
+        for query in audioSearchQueries(for: song) {
+            guard let results = try? await search(query) else { continue }
+            for case .album(let album) in results.sections.flatMap(\.items)
+            where rule.sameArtist(album.artists.map(\.name)) && !albums.contains(where: { $0.id == album.id }) {
+                albums.append(album)
+            }
+            if !albums.isEmpty { break }
+        }
+        for album in albums.prefix(3) {
+            guard let page = try? await self.album(album.id) else { continue }
+            let tracks = page.songs.filter(rule.sameSong).map { track in
+                var track = track
+                if track.album == nil { track.album = AlbumRef(name: page.album.title, id: page.album.id) }
+                if track.artists.isEmpty { track.artists = page.album.artists }
+                return track
+            }
+            if let found = bestAudioMatch(tracks, for: song, strictLength: strictLength) { return found }
+        }
+        return nil
+    }
+
+    /// Looks on the video's artist's page: its songs, and a single named after the song.
+    private static func artistListedAudioVersion(for song: Song, rule: AudioMatchRule, strictLength: Bool) async -> Song? {
+        guard let artistId = song.artists.first(where: { $0.id != nil })?.id, let page = try? await artist(artistId) else { return nil }
+        let items = page.sections.flatMap(\.items)
+        let listed = items.compactMap(\.song).filter(rule.sameSong)
+        if let found = bestAudioMatch(listed, for: song, strictLength: strictLength) { return found }
+        for case .album(let single) in items where !rule.keys.isDisjoint(with: titleKeys(single.title, artists: single.artists.map(\.name))) {
+            guard let release = try? await self.album(single.id) else { continue }
+            let tracks = release.songs.filter(rule.sameSong).map { track in
+                var track = track
+                if track.album == nil { track.album = AlbumRef(name: release.album.title, id: release.album.id) }
+                if track.artists.isEmpty { track.artists = release.album.artists }
+                return track
+            }
+            if let found = bestAudioMatch(tracks, for: song, strictLength: strictLength) { return found }
+            break
+        }
+        return nil
+    }
+
+    /// Of releases that share the video's title, version and artist, the one to play: the
+    /// edit whose length is within 20 seconds of the video's, or (with `strictLength` off)
+    /// the closest length when none is.
+    private static func bestAudioMatch(_ matches: [Song], for song: Song, strictLength: Bool) -> Song? {
+        // A release labelled as another arrangement ("(Female 3-Part Chorus)", "(18FES ver.)",
+        // "- movie ver.") is only used when the plain release isn't there.
+        let videoTags = versionTags(song.title)
+        let plain = matches.filter { versionTags($0.title).isSubset(of: videoTags) }
+        guard let length = song.duration else { return plain.first ?? matches.first }
+        let near: (Song) -> Bool = { abs(($0.duration ?? length) - length) <= 20 }
         // Prefer the edit whose length matches the video; never swap in a clearly different cut.
-        let close = matches.filter { abs(($0.duration ?? length) - length) <= 20 }
+        var pool = matches
+        if strictLength {
+            // The plain release exists but its length is off: another arrangement isn't a stand-in.
+            if plain.contains(where: near) { pool = plain } else if !plain.isEmpty { return nil }
+        } else if !plain.isEmpty {
+            pool = plain
+        }
+        let close = pool.filter(near)
         if close.isEmpty, !strictLength {
-            return matches.min { abs(($0.duration ?? length) - length) < abs(($1.duration ?? length) - length) }
+            return pool.min { abs(($0.duration ?? length) - length) < abs(($1.duration ?? length) - length) }
         }
         return close
             .min { first, second in
@@ -445,6 +625,29 @@ enum YTMusic {
         if let dash = result.range(of: " - ") { result = String(result[dash.upperBound...]) }
         result = result.replacingOccurrences(of: #"\s+(feat\.?|ft\.?|featuring)\s.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
         return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Version notes in a title: the bracketed or dash-separated parts that name an
+    /// arrangement or edit ("Female 3-Part Chorus", "18FES ver.", "Radio Edit"), normalised.
+    /// "Original" versions count as the plain song.
+    static func versionTags(_ title: String) -> Set<String> {
+        var notes: [String] = []
+        if let brackets = try? NSRegularExpression(pattern: "[\\(\\[【〔]([^\\)\\]】〕]*)[\\)\\]】〕]") {
+            for match in brackets.matches(in: title, range: NSRange(title.startIndex..., in: title)) {
+                if let inner = Range(match.range(at: 1), in: title) { notes.append(String(title[inner])) }
+            }
+        }
+        notes += title.components(separatedBy: " - ").dropFirst()
+        let named = #"(?i)\b(ver\.?|version|chorus|edit|mix|remix|remaster(ed)?|mono|stereo|acoustic|instrumental|demo|tv size|short|extended|sped|slowed|live)\b"#
+        let decoration = #"(?i)\b(official|music video|lyric video|visuali[sz]er|audio)\b"#
+        return Set(notes.compactMap { note in
+            guard note.range(of: named, options: .regularExpression) != nil,
+                  note.range(of: decoration, options: .regularExpression) == nil || note.range(of: #"(?i)\blive\b"#, options: .regularExpression) != nil,
+                  note.range(of: #"(?i)\boriginal\b"#, options: .regularExpression) == nil
+            else { return nil }
+            let key = normalized(note)
+            return key.isEmpty ? nil : key
+        })
     }
 
     /// Words that make a recording a different performance; both sides must agree on them.

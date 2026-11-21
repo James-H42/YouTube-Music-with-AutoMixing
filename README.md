@@ -51,7 +51,8 @@ and are used only to say what this software works with.
   Switch it off in Settings → AutoMix. Song titles, artists and lengths are also sent to the
   lyrics sources you leave on in Settings → Lyrics (BetterLyrics, LRCLIB, SimpMusic, lrc.red),
   and what you play to Last.fm or ListenBrainz if you sign in to them. The AI-artist blocklist
-  is downloaded from GitHub when that is on. Playlist import reads only the page you give it.
+  is downloaded from GitHub when that is on, and the AutoEq headphone catalogue when you search
+  it. Playlist import reads only the page you give it.
   Nothing else about you is sent.
 - **Local network.** Device Connect and the shared queue are off until you switch them on. They
   listen only on the local network, and every new device needs a six-digit code that you
@@ -98,6 +99,48 @@ left out, are in `docs/Metrolist v14 integration plan.md`.
   → Devices; off by default). The phone is the remote and AutoMix keeps running on the Mac.
   The security review is in `docs/Device Connect protocol review.md`.
 - Casting to Google Cast, FCast and DLNA was left out; see `docs/Casting threat model.md`.
+
+## From LastWave
+
+LastWave (github.com/Clash-Projects/LastWave-Native) is an Android YouTube Music client with
+audiophile features. Those that make sense on a Mac were brought across, adapted to Core Audio:
+
+- **Bit-perfect output** (Settings → Sound). The output runs at the song's own sample rate
+  (48 kHz for YouTube's streams) in its deepest format, so nothing is resampled. The equaliser,
+  limiter, loudness normalisation and AutoMix are left out, and the volume slider sets the
+  output's own volume. Optionally the output is kept to this app alone (exclusive "hog" mode).
+  Everything is undone when the setting is turned off or the app quits. YouTube's audio is still
+  lossy Opus; this keeps everything after the decoder from changing it.
+- **Signal path.** Settings → Sound shows each stage and says whether the path is bit-perfect.
+- **AutoEQ headphone search.** Equaliser → Profile → Find Your Headphones.
+
+Left out: lossless add-ons (Tidal streams via third-party servers with DRM decryption, and a paid
+service), DSD playback (no DSD sources) and the "Studio Master Clarity" enhancer (colours the sound).
+
+## Concerts
+
+Sidebar → Concerts lists upcoming concerts from the artists you follow and listen to most, near a
+place you type (a city, county or state, or a whole country). The app never reads your Mac's
+location; Apple Maps turns the typed place into coordinates. A city shows its own concerts first
+(within 40 km), then those a short trip away (150 km), then the rest of the country, each band
+soonest first; or nearest first. A concert's page has the date and local time, the venue with
+directions, the official ticket page, the event's website when it has one, Add to Calendar, and
+the line-up, each artist linking to their page here with a Listen button. Artist pages have a
+Concerts section, nearest first.
+
+Listings come from:
+- **Ticketmaster's Discovery API** (official listings, ticket links and line-ups for the UK,
+  Ireland, Europe, North America, Australia and New Zealand). It needs your own free key from
+  developer.ticketmaster.com (no payment details; 5,000 lookups a day), added in Concerts or
+  Settings → Integrations and kept in the Keychain. Only the country is sent with a search;
+  distances are worked out on the Mac. Results are kept for six hours, as its terms ask.
+- **MusicBrainz** (open, no key, every country including Japan, but volunteers enter the
+  concerts, so many are missing). Asked about your 40 most listened-to artists, one request a
+  second.
+
+Not used: Bandsintown, which powers Spotify's concerts, only grants API access to artists'
+teams with written approval; YouTube's own ticket shelf shows one event per artist, placed by
+your IP address, so it can't follow a place you choose.
 
 ## AutoMix
 
@@ -236,6 +279,9 @@ Diagnostic switches on the binary (see also the AutoMix and playback sections):
     .build/debug/Metrolist --probe "query"     # live test of browse/search/stream/lyrics parsing
     .build/debug/Metrolist --playtest          # muted end-to-end playback test
     METROLIST_HOME=/tmp/m .build/debug/Metrolist --snapshot out/   # offscreen screenshots
+    METROLIST_HOME=/tmp/m .build/debug/Metrolist --bitperfecttest [--live]   # bit-perfect output
+    METROLIST_HOME=/tmp/m .build/debug/Metrolist --concerttest [--live]      # concerts (live Ticketmaster: METROLIST_TICKETMASTER_KEY)
+    .build/debug/Metrolist --matchwhy <videoId>  # how a music video is matched to its song
 
 `METROLIST_HOME` redirects all of the app's storage, so tests never touch your own data.
 

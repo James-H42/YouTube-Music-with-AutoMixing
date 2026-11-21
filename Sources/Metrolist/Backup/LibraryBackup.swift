@@ -27,7 +27,7 @@ enum LibraryBackup {
         "audioQuality", "preferAudioVersions", "showVideos", "videoQuality", "appleArtistImages", "animatedArtistArtwork", "animatedAlbumCovers", "hideOriginalLyrics", "discordPresence", "normalizeVolume", "normalizationLevel", "normalizationBoost", "autoplay", "maxCacheGB",
         "showMenuBarPlayer", "miniPlayerOnTop", "fullScreenLyrics", "showRomanization", "autoMix", "mixLength", "mixStyle", "mixKeyMatch",
         "mixSampleLookup", "mixOrdersQueue", "mixAlbums", "volume", "accountPlayback", "lyricsProviderOrder", "lyricsProvidersDisabled",
-        "lyricsPreferWordSynced", "outputDeviceUID", "hideAIArtists",
+        "lyricsPreferWordSynced", "outputDeviceUID", "hideAIArtists", "bitPerfect", "exclusiveOutput",
     ]
 
     private static let plainFiles = ["library.json", "mixes.json", "samples.json", "eq.json", "blocked.json"]

@@ -134,6 +134,41 @@ enum SoundTest {
                   "preamp \(parsed.profile.preamp), \(parsed.profile.bands.count) filters, \(parsed.skipped) skipped")
         } else { check("AutoEQ parse", false, "nil") }
         check("AutoEQ rejects other text", AutoEQ.parse("hello world", name: "x") == nil, "")
+
+        // AutoEQ headphone catalogue (results/INDEX.md).
+        let index = """
+        # Index
+        - [Sennheiser HD 600](./oratory1990/over-ear/Sennheiser%20HD%20600) by oratory1990
+        - [Sennheiser HD 600](./crinacle/GRAS%2043AG-7%20over-ear/Sennheiser%20HD%20600) by crinacle on GRAS 43AG-7
+        - [1MORE Aero (ANC Off)](./HypetheSonics/GRAS%20RA0045%20in-ear/1MORE%20Aero%20(ANC%20Off)) by HypetheSonics on GRAS RA0045
+        - [Sennheiser HD 6XX](./oratory1990/over-ear/Sennheiser%20HD%206XX) by oratory1990
+        - [Bad](./../etc/passwd) by nobody
+        """
+        let entries = AutoEQ.parseIndex(index)
+        check("AutoEQ index parse", entries.count == 4 && entries[1].rig == "GRAS 43AG-7" && entries[0].rig == nil && entries[2].name == "1MORE Aero (ANC Off)" && entries[2].isInEar && !entries[0].isInEar,
+              "\(entries.map { "\($0.name) | \($0.subtitle)" })")
+        check("AutoEQ index refuses paths leaving results/", !entries.contains { $0.name == "Bad" }, "")
+        check("AutoEQ profile address", entries[0].profileAddress == "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/oratory1990/over-ear/Sennheiser%20HD%20600/Sennheiser%20HD%20600%20ParametricEQ.txt", entries[0].profileAddress)
+        let found = AutoEQ.search(entries, "hd 600")
+        check("AutoEQ search", found.count == 2 && found.allSatisfy { $0.name == "Sennheiser HD 600" }, "\(found.map(\.subtitle))")
+        check("AutoEQ search needs every word", AutoEQ.search(entries, "hd 600 crinacle").map(\.source) == ["crinacle"], "")
+        if CommandLine.arguments.contains("--live") {
+            let semaphore = DispatchSemaphore(value: 0)
+            nonisolated(unsafe) var live: (count: Int, profile: AutoEQ.Result?, error: String?) = (0, nil, nil)
+            Task.detached {
+                do {
+                    let catalogue = try await AutoEQ.catalog()
+                    live.count = catalogue.count
+                    if let entry = AutoEQ.search(catalogue, "Sennheiser HD 600").first(where: { $0.source == "oratory1990" }) {
+                        live.profile = try await AutoEQ.download(entry.profileAddress)
+                    }
+                } catch { live.error = "\(error)" }
+                semaphore.signal()
+            }
+            semaphore.wait()
+            check("AutoEQ catalogue downloads", live.count > 1_000, live.error ?? "\(live.count) measurements")
+            check("AutoEQ profile of a found headphone loads", (live.profile?.profile.bands.count ?? 0) >= 5, "\(live.profile.map { "\($0.profile.name): preamp \($0.profile.preamp) dB, \($0.profile.bands.count) filters" } ?? "none")")
+        }
         print(failures == 0 ? "all sound checks passed" : "\(failures) sound checks FAILED")
     }
 }

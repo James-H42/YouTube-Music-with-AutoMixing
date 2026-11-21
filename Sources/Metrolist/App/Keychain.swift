@@ -8,6 +8,13 @@ enum Keychain {
     /// Tests use another service name so they never touch real items.
     nonisolated(unsafe) static var service = "Metrolist"
 
+    /// A test run: its data lives in a throwaway `METROLIST_HOME`, or it asked for a test
+    /// Keychain. The owner's own app sets neither.
+    static var isTestRun: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["METROLIST_TEST_KEYCHAIN"] == "1" || environment["METROLIST_HOME"] != nil
+    }
+
     private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }

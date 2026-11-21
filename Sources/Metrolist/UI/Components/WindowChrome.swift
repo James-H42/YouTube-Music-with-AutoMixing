@@ -21,6 +21,7 @@ struct ImmersiveWindowChrome: NSViewRepresentable {
 
     final class ChromeView: NSView {
         private var savedTitle: NSWindow.TitleVisibility?
+        private var savedTransparent: Bool?
         /// Items this view hid, so only those are shown again.
         private var hiddenItems: [NSToolbarItem] = []
         private var itemsObserver: NSObjectProtocol?
@@ -36,6 +37,11 @@ struct ImmersiveWindowChrome: NSViewRepresentable {
             if immersive {
                 if savedTitle == nil { savedTitle = window.titleVisibility }
                 window.titleVisibility = .hidden
+                // The page's title bar background (and its scroll edge effect) is drawn above
+                // all content, so it showed as a grey band across the top of the player. A
+                // transparent title bar draws none and keeps its height.
+                if savedTransparent == nil { savedTransparent = window.titlebarAppearsTransparent }
+                window.titlebarAppearsTransparent = true
                 hideItems(of: window)
                 // SwiftUI can add toolbar items while the player is open (the progress
                 // indicator, for one); hide those as they arrive.
@@ -55,6 +61,8 @@ struct ImmersiveWindowChrome: NSViewRepresentable {
                 hiddenItems = []
                 if let savedTitle { window.titleVisibility = savedTitle }
                 savedTitle = nil
+                if let savedTransparent { window.titlebarAppearsTransparent = savedTransparent }
+                savedTransparent = nil
             }
         }
 

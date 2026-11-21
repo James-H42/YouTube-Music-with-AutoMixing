@@ -20,7 +20,9 @@ struct AutoMixButton: View {
 
     var body: some View {
         let player = model.player
-        let isOn = model.settings.autoMix
+        // Bit-perfect output pauses AutoMix without changing the setting.
+        let isOn = model.settings.mixes
+        let paused = model.settings.autoMix && model.settings.bitPerfect
         if player.autoMixAvailable {
             Menu {
                 options
@@ -39,9 +41,9 @@ struct AutoMixButton: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .contextMenu { options }
-            .help(isOn ? "AutoMix: On. Click to turn off; hold for the transition editor." : "AutoMix: Off. Click to mix between songs like a DJ.")
+            .help(paused ? "AutoMix: Paused while bit-perfect output is on (Settings › Sound)." : isOn ? "AutoMix: On. Click to turn off; hold for the transition editor." : "AutoMix: Off. Click to mix between songs like a DJ.")
             .accessibilityLabel("AutoMix")
-            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityValue(paused ? "Paused" : isOn ? "On" : "Off")
         }
     }
 
@@ -115,7 +117,7 @@ struct TransitionRow: View {
 
     var body: some View {
         let player = model.player
-        if model.settings.autoMix, player.nextSong != nil {
+        if model.settings.mixes, player.nextSong != nil {
             HStack(spacing: 10) {
                 AutoMixGlyph(animating: player.mixActivity != nil)
                     .font(.system(size: 13, weight: .semibold))

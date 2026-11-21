@@ -11,6 +11,7 @@ struct EqualizerView: View {
     @ViewState private var name = ""
     @ViewState private var address = ""
     @ViewState private var notice: String?
+    @ViewState private var searchingHeadphones = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -57,6 +58,9 @@ struct EqualizerView: View {
         } message: {
             Text("Paste the address of a ParametricEQ.txt file from the AutoEq project.")
         }
+        .sheet(isPresented: $searchingHeadphones) {
+            HeadphoneSearchSheet { adopt($0) }
+        }
     }
 
     private func adopt(_ parsed: AutoEQ.Result) {
@@ -79,6 +83,7 @@ struct EqualizerView: View {
                     ForEach(eq.saved) { profile in Button(profile.name) { eq.choose(profile) } }
                 }
                 Divider()
+                Button("Find Your Headphones (AutoEQ)…") { searchingHeadphones = true }
                 Button("Import AutoEQ File…") { importing = true }
                 Button("Import AutoEQ from Web…") { address = ""; askingURL = true }
                 Button("Save Current As…") { name = eq.profile.name; askingName = true }
@@ -221,5 +226,88 @@ private struct EQCurve: View {
     private func distance(_ band: EQBand, to point: CGPoint, _ size: CGSize) -> CGFloat {
         let center = CGPoint(x: x(band.frequency, size.width), y: y(band.kind.hasGain ? band.gain : 0, size.height))
         return hypot(center.x - point.x, center.y - point.y)
+    }
+}
+
+/// Finds a headphone in the AutoEq project's catalogue and loads its correction, as LastWave's
+/// AutoEQ screen does.
+struct HeadphoneSearchSheet: View {
+    let choose: (AutoEQ.Result) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @ViewState private var entries: [AutoEQ.Entry] = []
+    @ViewState private var query = ""
+    @ViewState private var selection: AutoEQ.Entry.ID?
+    @ViewState private var loading = true
+    @ViewState private var problem: String?
+    @ViewState private var fetching = false
+
+    private var results: [AutoEQ.Entry] { AutoEQ.search(entries, query) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Find Your Headphones").font(.headline)
+            Text("AutoEQ corrects a headphone's measured frequency response towards a neutral target. Search \(entries.isEmpty ? "the AutoEq catalogue" : "\(entries.count.formatted()) measurements") by name.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            TextField("Headphone or earphone name", text: $query)
+                .textFieldStyle(.roundedBorder)
+            List(results, selection: $selection) { entry in
+                HStack(spacing: 8) {
+                    Image(systemName: entry.isInEar ? "earbuds" : "headphones")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(entry.name)
+                        Text(entry.subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tag(entry.id)
+            }
+            .frame(minHeight: 260)
+            .overlay {
+                if loading {
+                    ProgressView("Loading the catalogue…")
+                } else if let problem {
+                    Text(problem).foregroundStyle(.secondary).padding()
+                } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text("Type a name, such as “HD 600” or “AirPods Pro”.").foregroundStyle(.secondary)
+                } else if results.isEmpty {
+                    Text("No headphone matches “\(query)”.").foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Text("A model can be listed once per measurement; oratory1990's are the usual first choice.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Use") { use() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selection == nil || fetching)
+            }
+        }
+        .padding(18)
+        .frame(width: 520, height: 480)
+        .task {
+            do { entries = try await AutoEQ.catalog() } catch { problem = "The AutoEq catalogue couldn't be downloaded: \(error.localizedDescription)" }
+            loading = false
+        }
+    }
+
+    private func use() {
+        guard let entry = results.first(where: { $0.id == selection }) else { return }
+        fetching = true
+        Task {
+            do {
+                var result = try await AutoEQ.download(entry.profileAddress)
+                result.profile.name = entry.name
+                choose(result)
+                dismiss()
+            } catch {
+                problem = error.localizedDescription
+            }
+            fetching = false
+        }
     }
 }

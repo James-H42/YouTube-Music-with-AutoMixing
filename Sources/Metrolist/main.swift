@@ -3,9 +3,10 @@ import AppKit
 import AVFoundation
 import Foundation
 
-// Tests that open the real window use a throwaway Keychain service, so a debug build never
-// asks for the Keychain password by reading the installed app's items.
-if ProcessInfo.processInfo.environment["METROLIST_TEST_KEYCHAIN"] == "1" {
+// Test runs (a throwaway METROLIST_HOME, or METROLIST_TEST_KEYCHAIN=1) use a throwaway Keychain
+// service, so a debug build never reads the installed app's items and macOS never stops an
+// unattended test to ask for the Keychain password.
+if Keychain.isTestRun {
     Keychain.service = "Metrolist.test.\(UUID().uuidString)"
 }
 
@@ -23,6 +24,21 @@ if let flag = CommandLine.arguments.firstIndex(of: "--geniusparse"), CommandLine
         for ref in info.samples { print("uses:", ref.title, "—", ref.artist ?? "?", ref.interpolation == true ? "(replayed)" : "(sampled)") }
         print("used by \(info.sampledBy.count) songs, e.g.", info.sampledBy.prefix(3).map { "\($0.title) — \($0.artist ?? "?")" })
     } else { print("could not read a Genius song from that file") }
+    exit(0)
+}
+
+// `--rawpost <endpoint> <WEB|WEB_REMIX|MWEB> file '<json body>'`: a raw InnerTube reply, for research.
+if let flag = CommandLine.arguments.firstIndex(of: "--rawpost"), CommandLine.arguments.count > flag + 4 {
+    let args = Array(CommandLine.arguments[(flag + 1)...])
+    let client: YouTubeClient = switch args[1] { case "WEB": .web; case "MWEB": .mweb; default: .webRemix }
+    let body = (try? JSONSerialization.jsonObject(with: Data(args[3].utf8))) as? [String: Any] ?? [:]
+    do {
+        let json = try await InnerTube.shared.post(args[0], client: client, body: body)
+        if let raw = json.raw, let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
+            try data.write(to: URL(fileURLWithPath: args[2]))
+            print("wrote \(data.count) bytes")
+        }
+    } catch { print("FAILED", error) }
     exit(0)
 }
 
@@ -71,7 +87,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--album"), CommandLine.argum
         let json = try await InnerTube.shared.post("browse", body: ["browseId": found.id])
         let raw = json.first("musicShelfRenderer")["contents"].array.compactMap { Parser.item($0)?.song }
         let page = try await YTMusic.album(found.id)
-        print("album:", page.album.title, "playlist:", page.album.playlistId ?? "-")
+        print("album:", page.album.title, "playlist:", page.album.playlistId ?? "-", "artists:", page.album.artists.map { "\($0.name)=\($0.id ?? "nil")" })
         for (index, song) in page.songs.enumerated() {
             let pageSong = index < raw.count ? raw[index] : nil
             print(String(format: "%2d", index + 1), song.id, song.isVideo ? "VIDEO" : "audio", song.duration ?? -1, song.title,
@@ -89,6 +105,38 @@ if let flag = CommandLine.arguments.firstIndex(of: "--counterpart"), CommandLine
     if let found = await YTMusic.audioCounterpart(for: song) {
         print("→", found.id, found.title, "—", found.artistText, "| album:", found.album?.name ?? "-", "| explicit:", found.explicit, "| video:", found.isVideo, "|", found.duration ?? -1, "s")
     } else { print("→ no audio counterpart found") }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--concerttest") {
+    await ConcertTest.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--bitperfecttest") {
+    await BitPerfectTest.run()
+    exit(0)
+}
+
+// `--matchwhy videoId`: each step of finding a music video's audio release, for debugging a
+// video that plays as itself in a playlist.
+if let flag = CommandLine.arguments.firstIndex(of: "--matchwhy"), CommandLine.arguments.count > flag + 1 {
+    let id = CommandLine.arguments[flag + 1]
+    let page = try? await YTMusic.queue(videoId: id)
+    guard let video = page?.songs.first(where: { $0.id == id }) ?? page?.songs.first else { print("no queue for \(id)"); exit(1) }
+    print("video:", video.id, video.videoType ?? "-", "|", video.title, "—", video.artists.map { "\($0.name)=\($0.id ?? "nil")" }, "| album:", video.album.map { "\($0.name)=\($0.id ?? "nil")" } ?? "-", "|", video.duration ?? -1, "s")
+    print("queue pairs:", page?.counterparts[id].map { "\($0.id) \($0.title)" } ?? "none")
+    for query in YTMusic.audioSearchQueries(for: video) {
+        let results = (try? await YTMusic.search(query, filter: .songs).sections.flatMap(\.items).compactMap(\.song)) ?? []
+        print("songs search “\(query)”:")
+        for song in results.prefix(8) { print("   ", song.id, song.title, "—", song.artistText, "|", song.album?.name ?? "-", "|", song.duration ?? -1, "s") }
+    }
+    let strict = await YTMusic.audioCounterpart(for: video)
+    print("→ strict:", strict.map { "\($0.id) \($0.title) — \($0.artistText) | \($0.album?.name ?? "-") | \($0.duration ?? -1) s" } ?? "none")
+    let loose = await YTMusic.audioCounterpart(for: video, strictLength: false)
+    print("→ playlist (any length):", loose.map { "\($0.id) \($0.title) — \($0.artistText) | \($0.album?.name ?? "-") | \($0.duration ?? -1) s" } ?? "none")
+    let searched = await YTMusic.searchedAudioVersion(for: video, strictLength: false)
+    print("→ playlist search only:", searched.map { "\($0.id) \($0.title) — \($0.artistText) | \($0.album?.name ?? "-") | \($0.duration ?? -1) s" } ?? "none")
     exit(0)
 }
 

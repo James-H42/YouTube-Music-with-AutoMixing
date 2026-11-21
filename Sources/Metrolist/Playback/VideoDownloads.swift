@@ -46,6 +46,8 @@ final class VideoDownloads {
     }
 
     func isDownloaded(_ videoId: String) -> Bool { records[videoId] != nil }
+    /// Size of the saved pictures, in bytes.
+    var bytes: Int64 { records.values.reduce(0) { $0 + $1.bytes } }
     func isDownloading(_ videoId: String) -> Bool { progress[videoId] != nil }
     var activeCount: Int { progress.count }
 

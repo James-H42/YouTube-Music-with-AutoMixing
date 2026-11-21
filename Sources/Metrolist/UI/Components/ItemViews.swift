@@ -75,6 +75,8 @@ struct ItemCard: View {
                     .font(.callout.weight(.medium))
                     .lineLimit(2)
                     .multilineTextAlignment(isArtist ? .center : .leading)
+                // Each artist under a release links to their page, whether the card is an
+                // album, EP, single or a song (shelves list singles as songs).
                 if case .album(let album) = item, !album.artists.isEmpty {
                     HStack(spacing: 0) {
                         ArtistLinks(artists: album.artists)
@@ -82,6 +84,10 @@ struct ItemCard: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                } else if case .song(let song) = item, !song.artists.isEmpty {
+                    ArtistLinks(artists: song.artists)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
                     Text(item.subtitle)
                         .font(.caption)
@@ -228,10 +234,20 @@ struct ItemRow: View {
                 ArtworkView(url: item.thumbnail, size: 40, cornerRadius: 5, circular: { if case .artist = item { true } else { false } }())
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title).lineLimit(1)
-                    Text(kind + (item.subtitle.isEmpty ? "" : " • " + item.subtitle))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Group {
+                        if case .album(let album) = item, !album.artists.isEmpty {
+                            HStack(spacing: 0) {
+                                Text(kind + " • ")
+                                ArtistLinks(artists: album.artists)
+                                if let year = album.year { Text(" • \(year)") }
+                            }
+                        } else {
+                            Text(kind + (item.subtitle.isEmpty ? "" : " • " + item.subtitle))
+                        }
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

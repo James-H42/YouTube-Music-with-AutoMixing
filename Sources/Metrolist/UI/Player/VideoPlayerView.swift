@@ -160,7 +160,7 @@ struct VideoStageView: View {
 }
 
 /// The floating controls over a playing video.
-private struct VideoControls: View {
+struct VideoControls: View {
     @Binding var showQueue: Bool
     let isFullScreen: Bool
     let toggleFullScreen: () -> Void
@@ -185,12 +185,13 @@ private struct VideoControls: View {
                     .buttonStyle(IconButtonStyle(side: 28))
             }
             Scrubber()
+            // The two side groups take equal shares of the room left over, so the transport
+            // buttons sit at the bar's exact centre whatever the sides hold.
             HStack(spacing: 14) {
                 VolumeControl(width: 90)
-                    .frame(width: 140, alignment: .leading)
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 TransportButtons(large: false)
-                Spacer(minLength: 0)
+                    .fixedSize()
                 HStack(spacing: 6) {
                     VideoQualityMenu()
                     Button {
@@ -227,7 +228,8 @@ private struct VideoControls: View {
                     .help(isFullScreen ? "Exit Full Screen" : "Enter Full Screen")
                 }
                 .buttonStyle(IconButtonStyle(side: 28))
-                .frame(width: 140 + 60, alignment: .trailing)
+                .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding(.horizontal, 18)
