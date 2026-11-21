@@ -80,7 +80,9 @@ private final class OpusReader: PCMReader {
                 // Start exactly on the requested sample rather than on a packet edge, so a
                 // cued mix point or a loop lands on the beat.
                 if time < keepFrom - 0.0005 {
-                    let skip = AVAudioFrameCount((keepFrom - time) * 48_000)
+                    // Rounded, not truncated: floating error (4799.9999 frames) would otherwise put
+                    // the buffer a sample away from its label, and stems need the label exact.
+                    let skip = AVAudioFrameCount(((keepFrom - time) * 48_000).rounded())
                     guard skip < buffer.frameLength else { continue }
                     if skip > 0, let trimmed = Self.slice(buffer, from: skip, count: buffer.frameLength - skip) {
                         return .buffer(trimmed, time: keepFrom)
@@ -89,6 +91,38 @@ private final class OpusReader: PCMReader {
                 return .buffer(buffer, time: time)
             }
         }
+    }
+}
+
+extension AudioEngine {
+    /// What a deck reads from a WebM file after seeking to `start`: the left channel and the
+    /// song time playback gives its first sample (for `--stemtest`, which checks that stems line
+    /// up with these samples).
+    static func playbackSamples(file: URL, from start: Double, seconds: Double, stems: StemMix? = nil) -> (time: Double, left: [Float])? {
+        let reader = OpusReader(source: FileByteSource(url: file))
+        reader.seek(to: start)
+        var first: Double?
+        var left: [Float] = []
+        var expected = 0.0
+        var skippedFirst = false
+        while left.count < Int(seconds * 48_000) {
+            switch reader.read() {
+            case .buffer(let buffer, let time):
+                guard let channels = buffer.floatChannelData else { continue }
+                // The first buffer after a seek is cut to the seek point; take the reference
+                // from a whole packet's own time.
+                if !skippedFirst { skippedFirst = true; continue }
+                if let stems { applyStems(stems, to: buffer, at: time) }
+                if first == nil { first = time; expected = time }
+                // Buffers must follow on sample for sample from their labels.
+                if abs(time - expected) > 1.5 / 48_000 { return nil }
+                left.append(contentsOf: UnsafeBufferPointer(start: channels[0], count: Int(buffer.frameLength)))
+                expected = time + Double(buffer.frameLength) / 48_000
+            case .needMoreData, .end:
+                return first.map { ($0, left) }
+            }
+        }
+        return first.map { ($0, left) }
     }
 }
 
@@ -191,6 +225,59 @@ final class AudioEngine: @unchecked Sendable {
     private var nextObserver: UUID?
     /// The track still audible while buffers of the next one are already scheduled.
     private var previous: (media: OpenedMedia, reader: PCMReader)?
+    /// Stems of a stretch of the current track and how much of each to keep, by song time: a
+    /// transition's vocal, bass and drum hand-overs. Applied as buffers are read, before the
+    /// stretcher, as `x - Σ (1 - gain) · stem`, so a gain of 1 leaves the samples untouched.
+    private var stemMix: StemMix?
+
+    struct StemMix {
+        let videoId: String
+        let stems: StemSeparator.Stems
+        /// Gain of each stem (`StemSeparator.sources` order) at a song time.
+        let gains: @Sendable (Double) -> [Float]
+    }
+
+    /// Sets (or clears) the stems applied to this deck's buffers from now on.
+    func setStemMix(_ mix: StemMix?) {
+        queue.async { self.stemMix = mix }
+    }
+
+    /// The cached file of the track being scheduled, for stem separation.
+    var currentFile: (videoId: String, url: URL)? {
+        queue.sync { media.flatMap { media in media.fileURL.map { (media.videoId, $0) } } }
+    }
+
+    private static func applyStems(_ mix: StemMix, to buffer: AVAudioPCMBuffer, at time: Double) {
+        let stems = mix.stems
+        let frames = Int(buffer.frameLength)
+        let rate = buffer.format.sampleRate
+        guard abs(rate - stems.rate) < 1, let channels = buffer.floatChannelData, frames > 0 else { return }
+        guard time + Double(frames) / rate > stems.start, time < stems.end else { return }
+        let channelCount = min(2, Int(buffer.format.channelCount))
+        let block = 64
+        var frame = 0
+        while frame < frames {
+            let count = min(block, frames - frame)
+            let moment = time + Double(frame) / rate
+            let index = Int(((moment - stems.start) * stems.rate).rounded())
+            if index + count > 0, index < stems.frames {
+                let gains = mix.gains(moment)
+                for source in 0 ..< min(gains.count, stems.audio.count) where gains[source] < 0.9999 {
+                    let cut = 1 - gains[source]
+                    for channel in 0 ..< channelCount {
+                        let stem = stems.audio[source][min(channel, stems.audio[source].count - 1)]
+                        let output = channels[channel]
+                        for offset in 0 ..< count {
+                            let position = index + offset
+                            guard position >= 0, position < stem.count else { continue }
+                            output[frame + offset] -= cut * stem[position]
+                        }
+                    }
+                }
+            }
+            frame += count
+        }
+    }
 
     // Shared with readers on other threads.
     private let lock = NSLock()
@@ -284,6 +371,10 @@ final class AudioEngine: @unchecked Sendable {
 
     /// True when this deck is routed through the time-stretcher and can change tempo and pitch.
     var canStretch: Bool { lock.withLock { stretchActive } }
+
+    /// Song time up to which audio has been read and scheduled; it is heard up to 3 s later.
+    /// Stems set now change only the audio after this point.
+    var readPosition: Double { lock.withLock { baseTime + Double(scheduledFrames) / sampleRate } }
 
     /// Output level of this deck after its fader (RMS), once `enableMeter()` has been called.
     var meter: Float { lock.withLock { meterValue } }
@@ -552,6 +643,7 @@ final class AudioEngine: @unchecked Sendable {
                     }
                 }
                 let frames = Int64(buffer.frameLength)
+                if let stemMix, stemMix.videoId == media?.videoId { Self.applyStems(stemMix, to: buffer, at: time) }
                 if readerGain != 1, let channels = buffer.floatChannelData {
                     var scale = readerGain
                     for channel in 0 ..< Int(buffer.format.channelCount) {

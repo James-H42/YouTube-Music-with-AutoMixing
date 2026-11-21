@@ -25,7 +25,7 @@ enum LibraryBackup {
     /// whose name suggests a credential.
     static let settingsKeys = [
         "audioQuality", "preferAudioVersions", "showVideos", "videoQuality", "appleArtistImages", "animatedArtistArtwork", "animatedAlbumCovers", "hideOriginalLyrics", "discordPresence", "normalizeVolume", "normalizationLevel", "normalizationBoost", "autoplay", "maxCacheGB",
-        "showMenuBarPlayer", "miniPlayerOnTop", "fullScreenLyrics", "showRomanization", "autoMix", "mixLength", "mixStyle", "mixKeyMatch",
+        "showMenuBarPlayer", "miniPlayerOnTop", "fullScreenLyrics", "showRomanization", "autoMix", "mixLength", "mixStyle", "mixKeyMatch", "mixStems",
         "mixSampleLookup", "mixOrdersQueue", "mixAlbums", "volume", "accountPlayback", "lyricsProviderOrder", "lyricsProvidersDisabled",
         "lyricsPreferWordSynced", "outputDeviceUID", "hideAIArtists", "bitPerfect", "exclusiveOutput",
     ]
@@ -55,7 +55,7 @@ enum LibraryBackup {
     // MARK: Writing
 
     @discardableResult
-    static func create(at destination: URL, includeAnalysis: Bool, root: URL = AppPaths.root, defaults: UserDefaults = .standard) throws -> Int {
+    static func create(at destination: URL, includeAnalysis: Bool, root: URL = AppPaths.root, defaults: UserDefaults = AppPaths.settings) throws -> Int {
         var zip = ZipWriter()
         var count = 0
         let encoder = JSONEncoder()
@@ -122,7 +122,7 @@ enum LibraryBackup {
     /// Replaces the app's data with the backup's. Everything is read and validated first; only
     /// then is the current data copied to `Backups/before-restore-…` and the new data written.
     @discardableResult
-    static func restore(from url: URL, root: URL = AppPaths.root, defaults: UserDefaults = .standard) throws -> Result {
+    static func restore(from url: URL, root: URL = AppPaths.root, defaults: UserDefaults = AppPaths.settings) throws -> Result {
         let (archive, _) = try open(url)
         var files: [(name: String, data: Data)] = []
         var settings: [String: Any] = [:]

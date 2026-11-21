@@ -67,6 +67,93 @@ struct MixOptions: Equatable {
     var keyMatch = true
     /// A sampling link between the two songs that a database records (`SampleDatabase`).
     var relation: SampleRelation?
+    /// Use stems in beat-matched overlaps (`StemSeparator`): vocal, bass and drum hand-overs.
+    var stems = false
+}
+
+/// What the similarity search measured about two songs sharing material: the best match at
+/// another speed (a sample replayed faster or slower) and the best at the same speed. These are
+/// the sample gate's inputs (`SampleGate`), and `--mixaudit --features` writes them out for
+/// training.
+struct SampleEvidence {
+    /// Whether the tempos allowed a reading at another speed at all.
+    var stretched = false
+    /// Harmony agreement of the best match at another speed (diagonal mean of cosines).
+    var value = 0.0
+    /// Its standing against the same-speed, unshifted alignments (the old gate's measure).
+    var standout = 0.0
+    /// Its standing against the other alignments of its own speed and pitch.
+    var variantStandout = 0.0
+    /// How much better it is than the best match at the same speed and another pitch.
+    var pitchMargin = 0.0
+    /// Share of eight-second stretches of the outgoing song that match somewhere at that speed.
+    var coverage = 0.0
+    /// The same share for the best match at the same speed.
+    var sameCoverage = 0.0
+    /// Semitones from both readings a sample allows: pitch kept, or pitch moved with the speed.
+    var tapeDeviation = 0.0
+    /// Distance of the tempo ratio from a whole number of semitones.
+    var semitoneFit = 1.0
+    /// Size of the speed change, |log2(ratio)|.
+    var logStretch = 0.0
+    /// Where the match enters the incoming song, in seconds.
+    var entry = 0.0
+    /// Agreement of tone colour along the match, each song against its own average.
+    var tone = 0.0
+    var keysAgree = false
+    var beatConfidence = 0.0
+    /// The tempos are a whole number of semitones apart, like one record at two speeds.
+    var record = false
+    /// A database links the two songs.
+    var known = false
+    var sameValue = 0.0
+    var sameStandout = 0.0
+    var sameTone = 0.0
+    var sameEntry = 0.0
+
+    static let header = "stretched\tvalue\tstandout\tvariantStandout\tpitchMargin\tcoverage\tsameCoverage\ttapeDeviation\tsemitoneFit\tlogStretch\tentry\ttone\tkeysAgree\tbeatConfidence\trecord\tknown\tsameValue\tsameStandout\tsameTone\tsameEntry"
+
+    var line: String {
+        let values: [Double] = [stretched ? 1 : 0, value, standout, variantStandout, pitchMargin, coverage, sameCoverage, tapeDeviation,
+                                semitoneFit, logStretch, entry, tone, keysAgree ? 1 : 0, beatConfidence, record ? 1 : 0, known ? 1 : 0,
+                                sameValue, sameStandout, sameTone, sameEntry]
+        return values.map { String(format: "%.4f", $0) }.joined(separator: "\t")
+    }
+}
+
+/// Whether a match at another speed is real shared material, for songs no database links.
+///
+/// A logistic model trained on 2026-11-21 (`Tools/ml/train_gate.py`, see
+/// docs/AUTOMIX_REFERENCE_MIXES.md): 204 known sample, interpolation and remix pairs, including
+/// faster and slower replays of same-speed ones, against 826 DJ-adjacent, random and play-history
+/// pairs, also replayed. Folds are grouped by song. The old rule (4.5 σ above the same-speed
+/// alignments) fired on 70 % of those negatives, with up to 60 % speed changes on unrelated songs,
+/// and its ranking was barely better than chance (AUC 0.650). This gate has AUC 0.710 held out. At
+/// its threshold it passes about 8 % of negatives and 41 % of the real matches. Real tempo changes in DJ mixes stay
+/// under 20 % in 98.6 % of transitions (Kim et al., ISMIR 2020), so a missed sample, which falls
+/// back to a blend, costs far less than a false one. The strongest cue is `pitchMargin`: a real
+/// sample matches at one pitch clearly better than at the others.
+enum SampleGate {
+    // Tools/ml/data/gate/gate-stretched-v1.json: variantStandout, pitchMargin, coverage, tone,
+    // tapeDeviation, semitoneFit (standardised), L2 0.3.
+    static let mean = [4.6777, 0.06507, 0.13705, 0.04625, 0.86306, 0.25808]
+    static let scale = [0.75614, 0.07564, 0.10793, 0.30575, 0.70198, 0.14519]
+    static let weights = [0.07479, 1.02688, 0.04011, -0.09277, -0.25263, -0.24013]
+    static let bias = -0.21045
+    static let threshold = 0.61722
+
+    static func logit(_ evidence: SampleEvidence) -> Double {
+        let values = [evidence.variantStandout, evidence.pitchMargin, evidence.coverage, evidence.tone,
+                      evidence.tapeDeviation, evidence.semitoneFit]
+        return zip(zip(values, zip(mean, scale)), weights).reduce(bias) { total, item in
+            let ((value, (centre, spread)), weight) = item
+            return total + weight * (value - centre) / spread
+        }
+    }
+
+    static func accepts(_ evidence: SampleEvidence) -> Bool {
+        evidence.stretched && logit(evidence) > threshold
+    }
 }
 
 /// Decides how to move from one analysed track to the next, the way a DJ would. It proposes
@@ -84,6 +171,31 @@ enum MixPlanner {
 
     /// Largest tempo change applied to a track for a beat-matched mix.
     static let maxStretch = 0.12
+
+    /// How far a match at *another speed* must stand out (in standard deviations of how alike
+    /// the two songs are in general) when no database says the songs share material. Such a
+    /// match brings a large speed change, and unrelated songs reached the old bar of 4.5 in about
+    /// a third of pairs in every style (measured with `--mixaudit`). Songs with a documented
+    /// link keep the old bar. Adjustable for measurement (`--mixaudit --standout x`).
+    nonisolated(unsafe) static var unlinkedStretchStandout = 4.5
+    /// Latest entry into the next song for such an unconfirmed match, in seconds.
+    nonisolated(unsafe) static var unlinkedStretchLatestEntry = 1_000.0
+    /// Whether the tempo-ratio-only guess ("one record replayed at another speed") is offered
+    /// without a documented link. The ratio alone matches by chance in about one pair in five.
+    nonisolated(unsafe) static var unlinkedRecordGuess = true
+
+    /// When set, `similar` records what it measured about the best match at another speed in
+    /// `lastEvidence` (for `--mixaudit --features`, which trains the sample gate).
+    nonisolated(unsafe) static var collectEvidence = false
+    nonisolated(unsafe) static var lastEvidence: SampleEvidence?
+    /// Whether unlinked matches at another speed go through the learned `SampleGate` (on) or the
+    /// old standout rule (off, for comparison: `--mixaudit --no-gate`).
+    nonisolated(unsafe) static var sampleGateEnabled = true
+    /// Largest tempo gap bridged by a ramp (the playing song easing to the next one's tempo before
+    /// a beat-matched overlap) when the songs share no material. DJs change tempo by more than 10 %
+    /// in 5.5 % of transitions and by more than 20 % in 1.4 % (Kim et al., ISMIR 2020), so gaps
+    /// past this fade instead. 0 turns ramps off (`--mixaudit --ramp 0`).
+    nonisolated(unsafe) static var rampMaxStretch = 0.20
 
     static func harmonicallyCompatible(_ a: TrackAnalysis, _ b: TrackAnalysis, shift: Int = 0) -> Bool {
         let keyB = ((b.key + shift) % 12 + 12) % 12
@@ -124,7 +236,15 @@ enum MixPlanner {
         var vocal: [Float] = []
         var clarity: [Float] = []
         var boundary: [Bool] = []
+        /// Beats in each bar (4 unless bars were found one by one).
+        var beatsInBar: [Int] = []
         var count: Int { beat.count }
+
+        /// True when every bar in the range has four beats, so a plan counted in four-beat
+        /// bars lines up with the music there.
+        func regular(_ range: Range<Int>) -> Bool {
+            range.allSatisfy { $0 < 0 || $0 >= count || beatsInBar[$0] == 4 }
+        }
 
         init(_ analysis: TrackAnalysis, lyrics: Lyrics?) {
             self.analysis = analysis
@@ -137,15 +257,20 @@ enum MixPlanner {
             let voiced = MixPlanner.vocalIntervals(lyrics)
             var midShare: [Float] = []
 
-            var index = analysis.downbeatPhase
-            while index + 4 <= beats.count {
+            let lines = analysis.barLines
+            for (position, index) in lines.enumerated() {
+                // A bar runs to the next bar line: four beats unless the grid found bars one by
+                // one (pickups, short bars, other metres).
+                let span = position + 1 < lines.count ? lines[position + 1] - index : 4
+                guard span > 0, span <= 8, index + span <= beats.count else { continue }
                 beat.append(index)
+                beatsInBar.append(span)
                 time.append(beats[index])
                 var sum = [Float](repeating: 0, count: 12)
                 var level: Float = 0
                 var clarity: Float = 0
                 var middle: Float = 0
-                for step in 0 ..< 4 {
+                for step in 0 ..< span {
                     let b = index + step
                     for pitch in 0 ..< 12 { sum[pitch] += chromaBeats[b * 12 + pitch] }
                     let total = analysis.beatLow[b] + analysis.beatMid[b] + analysis.beatHigh[b]
@@ -155,17 +280,16 @@ enum MixPlanner {
                 }
                 let length = max(1e-6, sum.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot())
                 chroma.append(contentsOf: sum.map { $0 / length })
-                self.level.append(level / 4)
-                self.clarity.append(clarity / 4)
-                midShare.append(middle / 4)
+                self.level.append(level / Float(span))
+                self.clarity.append(clarity / Float(span))
+                midShare.append(middle / Float(span))
                 boundary.append(boundaries.contains(index))
                 if let voiced {
                     let start = beats[index]
-                    let end = index + 4 < beats.count ? beats[index + 4] : start + 240 / analysis.bpm
+                    let end = index + span < beats.count ? beats[index + span] : start + Double(span) * 60 / analysis.bpm
                     let covered = voiced.reduce(0.0) { $0 + max(0, min(end, $1.upperBound) - max(start, $1.lowerBound)) }
                     vocal.append(Float(min(1, covered / max(0.1, end - start))))
                 }
-                index += 4
             }
             if voiced == nil {
                 // Without timed lyrics, guess: singing pushes energy into the mid band.
@@ -239,7 +363,55 @@ enum MixPlanner {
             if !duplicate, sameKind < (plan.reason == .structure ? 3 : 2) { result.append(plan) }
             if result.count >= 6 { break }
         }
-        return result.map { describe($0, a, b) }
+        return result.map { describe(withStems($0, barsA, barsB, options: options), a, b) }
+    }
+
+    // MARK: - Stems
+
+    /// Stem moves for a beat-matched overlap, as DJs make them with stems and as Mosaikbox
+    /// (Sowula and Knees, ISMIR 2024) applies them: its rule-based stem changes raised listeners'
+    /// ratings of transitions from 3.08 to 3.46 out of 5 (30 listeners, p < 0.0001).
+    /// - Vocals: when both songs sing at once for more than two seconds, the outgoing vocals step
+    ///   aside over the first quarter (not in a lyric match, where the shared words are the point).
+    /// - Bass: never two basslines; they swap on the middle bar line. The stems do this, so the
+    ///   EQ's low band stays open.
+    /// - Drums: in a blend of two different songs, the new drums rise over the second quarter and
+    ///   the old ones drop back (Mosaikbox's figure 2). Shared material keeps its drums.
+    private static func withStems(_ plan: MixPlan, _ a: Bars, _ b: Bars, options: MixOptions) -> MixPlan {
+        guard options.stems, plan.sync, plan.beats >= 8, plan.loop == nil, plan.reason != .ending, plan.reason != .manual else { return plan }
+        var plan = plan
+        let spanA = Double(plan.beats) * plan.periodA
+        let spanB = Double(plan.beats) * plan.periodB
+        func barsInside(_ bars: Bars, from start: Double, span: Double) -> [Int] {
+            (0 ..< bars.count).filter { bars.time[$0] >= start - 0.05 && bars.time[$0] < start + span - 0.05 }
+        }
+        let insideA = barsInside(a, from: plan.outStart, span: spanA)
+        let insideB = barsInside(b, from: plan.inPoint, span: spanB)
+        var clashSeconds = 0.0
+        for (barA, barB) in zip(insideA, insideB) where barA < a.vocal.count && barB < b.vocal.count {
+            if a.vocal[barA] >= 0.5, b.vocal[barB] >= 0.5 { clashSeconds += 4 * plan.periodA }
+        }
+        var outgoing = StemLanes()
+        var incoming = StemLanes()
+        var moves: [String] = []
+        if clashSeconds > 2, plan.reason != .lyrics {
+            outgoing.vocals = MixCurve([(0, 1), (0.25, 0), (1, 0)])
+            moves.append("the playing song's vocals step aside")
+        }
+        outgoing.bass = MixCurve([(0, 1), (0.5, 1), (0.53, 0), (1, 0)])
+        incoming.bass = MixCurve([(0, 0), (0.5, 0), (0.53, 1), (1, 1)])
+        moves.append("the basslines swap halfway")
+        if plan.reason == .structure || plan.reason == .tempo {
+            incoming.drums = MixCurve([(0, 0), (0.25, 0), (0.5, 1), (1, 1)])
+            outgoing.drums = MixCurve([(0, 1), (0.25, 1), (0.5, 0.4), (1, 0.1)])
+            moves.append("the drums hand over")
+        }
+        plan.outgoingStems = outgoing
+        plan.incomingStems = incoming
+        plan.outgoing.bass = .constant(1)
+        plan.incoming.bass = .constant(1)
+        plan.note += (plan.note.isEmpty ? "" : "; ") + "with stems: " + moves.joined(separator: ", ")
+        return plan
     }
 
     // MARK: - Structure
@@ -252,13 +424,23 @@ enum MixPlanner {
         return sum
     }
 
+    /// Bar of the incoming track heard `step` bars of the outgoing one into an overlap that
+    /// starts at `barB`. `multiple` is the incoming beat's fold (`fold`): 1 when both are
+    /// counted alike, 2 when the incoming track is counted at double time (two of its bars pass
+    /// per bar of the outgoing one), ½ when at half time.
+    static func incomingBar(_ barB: Int, step: Int, multiple: Double) -> Int {
+        multiple == 1 ? barB + step : barB + Int((Double(step) * multiple).rounded(.down))
+    }
+
     /// Harmonic agreement of an overlap for each pitch shift from −2 to +2 semitones.
-    private static func harmony(_ a: Bars, from barA: Int, _ b: Bars, from barB: Int, bars: Int) -> [Float] {
+    private static func harmony(_ a: Bars, from barA: Int, _ b: Bars, from barB: Int, bars: Int, multiple: Double = 1) -> [Float] {
         (-2 ... 2).map { shift in
             var total: Float = 0
             var counted = 0
-            for step in 0 ..< bars where barA + step < a.count && barB + step < b.count {
-                total += chromaSimilarity(a, barA + step, b, barB + step, shift: shift)
+            for step in 0 ..< bars {
+                let other = incomingBar(barB, step: step, multiple: multiple)
+                guard barA + step < a.count, other < b.count else { continue }
+                total += chromaSimilarity(a, barA + step, b, other, shift: shift)
                 counted += 1
             }
             return counted > 0 ? total / Float(counted) : 0
@@ -287,8 +469,12 @@ enum MixPlanner {
         let trackB = b.analysis
         guard trackA.beatConfidence >= 0.5, trackB.beatConfidence >= 0.5 else { return [] }
         let roughA = 60 / trackA.bpm
-        let roughB = 60 / trackB.bpm * fold(60 / trackA.bpm, 60 / trackB.bpm)
+        let multiple = fold(60 / trackA.bpm, 60 / trackB.bpm)
+        let roughB = 60 / trackB.bpm * multiple
         guard abs(roughB / roughA - 1) <= maxStretch else { return [] }
+        // Bars of B heard during `step` bars of A (B's bars are shorter or longer than A's when
+        // one of the two is counted at half or double time).
+        func barOfB(_ barB: Int, _ step: Int) -> Int { incomingBar(barB, step: step, multiple: multiple) }
 
         let endA = min(trackA.audibleEnd, trackA.beats.last ?? trackA.audibleEnd)
         let earliestA = max(trackA.duration * 0.25, min(trackA.introEnd + 20, trackA.duration * 0.5))
@@ -324,20 +510,25 @@ enum MixPlanner {
                 sideA += 0.1 * Double(min(1, clarityA)) - 0.1
                 let levelA = a.meanLevel(max(0, barA - 4) ..< barA)
 
-                for barB in firstB ..< b.count where b.time[barB] <= latestB && barB + bars + 4 < b.count {
+                // Counted in four-beat bars: a stretch with a short bar or another metre in it
+                // would put the two songs' bar lines out of step.
+                guard a.regular(barA ..< barA + bars) else { continue }
+                for barB in firstB ..< b.count where b.time[barB] <= latestB && barOfB(barB, bars) + 4 < b.count {
+                    let endB = barOfB(barB, bars)
+                    guard b.regular(barB ..< endB) else { continue }
                     let skipB = trackB.energyShare(from: 0, to: b.time[barB])
-                    let clarityB = (barB ..< barB + bars).reduce(Float(0)) { $0 + b.clarity[$1] } / Float(bars)
+                    let clarityB = (barB ..< max(barB + 1, endB)).reduce(Float(0)) { $0 + b.clarity[$1] } / Float(max(1, endB - barB))
                     let startsOnBoundary = barB == firstB || b.isBoundary(barB)
                     // The classic rule: the new song's next section should land as the old one leaves.
-                    let landsOnBoundary = b.isBoundary(barB + bars) || abs(b.time[barB + bars] - trackB.introEnd) < roughB * 4
+                    let landsOnBoundary = b.isBoundary(endB) || abs(b.time[endB] - trackB.introEnd) < roughB * 4
                     var score = sideA - 1.4 * skipB + (startsOnBoundary ? 0.08 : 0) + (landsOnBoundary ? 0.12 : 0)
                     score += 0.1 * Double(min(1, clarityB)) - 0.1
 
-                    let (shift, harmonyValue) = chooseShift(harmony(a, from: barA, b, from: barB, bars: bars), options: options)
+                    let (shift, harmonyValue) = chooseShift(harmony(a, from: barA, b, from: barB, bars: bars, multiple: multiple), options: options)
                     var clash: Float = 0
-                    for step in 0 ..< bars where barA + step < a.count { clash += a.vocal[barA + step] * b.vocal[barB + step] }
+                    for step in 0 ..< bars where barA + step < a.count { clash += a.vocal[barA + step] * b.vocal[barOfB(barB, step)] }
                     clash /= Float(bars)
-                    let levelB = b.meanLevel(barB + bars ..< barB + bars + 4)
+                    let levelB = b.meanLevel(endB ..< endB + 4)
                     // Two voices or two keys at once grate more the longer they last.
                     score += 0.30 * Double(harmonyValue - 0.55) - 0.05 * Double(abs(shift))
                     score -= 0.40 * Double(clash) * (0.5 + 0.5 * seconds / target)
@@ -580,7 +771,8 @@ enum MixPlanner {
                let barA = a.time.indices.min(by: { abs(a.time[$0] - plan.outStart) < abs(a.time[$1] - plan.outStart) }),
                let barB = b.time.indices.min(by: { abs(b.time[$0] - plan.inPoint) < abs(b.time[$1] - plan.inPoint) }) {
                 // Where the two overlap for a few bars, their keys should agree as well.
-                let shift = chooseShift(harmony(a, from: barA, b, from: barB, bars: plan.beats / 4), options: options).shift
+                let multiple = fold(60 / trackA.bpm, 60 / trackB.bpm)
+                let shift = chooseShift(harmony(a, from: barA, b, from: barB, bars: plan.beats / 4, multiple: multiple), options: options).shift
                 if shift != 0 {
                     plan.outgoingPitch = Double(-shift)
                     plan.approach = approachLength(rate: 1, pitch: Double(shift))
@@ -720,6 +912,8 @@ enum MixPlanner {
             var stretch: Double
             /// How the incoming track's beat is counted against the outgoing one's (1, 2 or ½).
             var multiple: Double
+            /// Index into `variants`.
+            var variant: Int = 0
         }
         let steadyBoth = trackA.beatConfidence >= 0.5 && trackB.beatConfidence >= 0.5
         // A database may say these two songs share material. That settles *whether* (so what
@@ -760,7 +954,14 @@ enum MixPlanner {
 
         var best: [Match] = []
         var baseline: [Float] = []
-        for variant in variants {
+        // Per variant: how its alignments are spread, and each row of A's best value there. A
+        // match is judged against its own variant too, since variants at another speed are tried
+        // at many pitches and so give chance more goes (the sample gate's evidence).
+        var variantCount = [Int](repeating: 0, count: variants.count)
+        var variantSum = [Double](repeating: 0, count: variants.count)
+        var variantSquares = [Double](repeating: 0, count: variants.count)
+        var rowBest = [[Float]](repeating: [], count: variants.count)
+        for (variantIndex, variant) in variants.enumerated() {
             let stepB = step * variant.stretch
             let gridB = timeGrid(trackB, chroma: chromaB, from: 0, to: min(trackB.audibleEnd, reachB + Double(window) * stepB), step: stepB, rotate: variant.shift)
             let colsB = gridB.level.count
@@ -769,6 +970,7 @@ enum MixPlanner {
             let penalty = Float(abs(variant.shift)) * (variant.stretch == 1 ? 0.02 : 0.004) + (variant.stretch == 1 ? 0 : 0.01)
             let lastColumn = min(colsB - window, Int(reachB / stepB))
             guard lastColumn > 0 else { continue }
+            var rowMax = [Float](repeating: -1, count: rowsA)
             for row in 0 ..< rowsA - window {
                 for column in 0 ..< lastColumn {
                     var sum: Float = 0
@@ -781,14 +983,104 @@ enum MixPlanner {
                     guard !quiet else { continue }
                     let value = sum / Float(window) - penalty
                     if variant.shift == 0, variant.stretch == 1 { baseline.append(value) }
-                    best.append(Match(value: value, timeA: startA + Double(row) * step, timeB: Double(column) * stepB, shift: variant.shift, stretch: variant.stretch, multiple: variant.multiple))
+                    variantCount[variantIndex] += 1
+                    variantSum[variantIndex] += Double(value)
+                    variantSquares[variantIndex] += Double(value) * Double(value)
+                    if value > rowMax[row] { rowMax[row] = value }
+                    best.append(Match(value: value, timeA: startA + Double(row) * step, timeB: Double(column) * stepB, shift: variant.shift, stretch: variant.stretch, multiple: variant.multiple, variant: variantIndex))
                 }
             }
+            rowBest[variantIndex] = rowMax
         }
         guard baseline.count > 50 else { return [] }
         let mean = baseline.reduce(0, +) / Float(baseline.count)
         let deviation = max(1e-4, (baseline.reduce(Float(0)) { $0 + ($1 - mean) * ($1 - mean) } / Float(baseline.count)).squareRoot())
         best.sort { $0.value > $1.value }
+
+        /// Share of eight-second stretches of A that match somewhere in B, in this variant, nearly
+        /// as well as `level`. A sampled loop recurs through both songs; a chance match is a one-off.
+        func coverage(_ index: Int, level: Float) -> Double {
+            let rows = rowBest[index]
+            var chunks = 0
+            var hits = 0
+            for start in stride(from: 0, to: rows.count, by: window) {
+                guard let top = rows[start ..< min(rows.count, start + window)].max(), top > -1 else { continue }
+                chunks += 1
+                if top >= level - 0.05 { hits += 1 }
+            }
+            return chunks > 0 ? Double(hits) / Double(chunks) : 0
+        }
+        func variantStandout(_ match: Match) -> Double {
+            let count = Double(max(1, variantCount[match.variant]))
+            let average = variantSum[match.variant] / count
+            let spread = max(1e-4, (max(0, variantSquares[match.variant] / count - average * average)).squareRoot())
+            return (Double(match.value) - average) / spread
+        }
+        /// How alike the two passages' tone colour is, each measured against its own song's average.
+        func toneAgreement(_ match: Match) -> Double {
+            let stepB = step * match.stretch
+            let gridB = timeGrid(trackB, chroma: chromaB, from: 0, to: min(trackB.audibleEnd, reachB + Double(window) * stepB), step: stepB, rotate: match.shift)
+            let row = Int(((match.timeA - startA) / step).rounded())
+            let column = Int((match.timeB / stepB).rounded())
+            let rowsB = gridB.level.count
+            guard row >= 0, column >= 0, row + window <= rowsA, column + window <= rowsB else { return 0 }
+            func average(_ tone: [Float], _ rows: Int) -> [Float] {
+                var sum = [Float](repeating: 0, count: 7)
+                for index in 0 ..< rows { for band in 0 ..< 7 { sum[band] += tone[index * 7 + band] / Float(rows) } }
+                return sum
+            }
+            let meanA = average(gridA.tone, rowsA)
+            let meanB = average(gridB.tone, rowsB)
+            var total = 0.0
+            for offset in 0 ..< window {
+                var dot: Float = 0
+                var lengthA: Float = 0
+                var lengthB: Float = 0
+                for band in 0 ..< 7 {
+                    let x = gridA.tone[(row + offset) * 7 + band] - meanA[band]
+                    let y = gridB.tone[(column + offset) * 7 + band] - meanB[band]
+                    dot += x * y
+                    lengthA += x * x
+                    lengthB += y * y
+                }
+                total += Double(dot / max(1e-6, (lengthA * lengthB).squareRoot()))
+            }
+            return total / Double(window)
+        }
+        var evidence = SampleEvidence()
+        evidence.known = known != nil
+        evidence.beatConfidence = min(trackA.beatConfidence, trackB.beatConfidence)
+        evidence.record = record != nil
+        if let same = best.first(where: { $0.stretch == 1 }) {
+            evidence.sameCoverage = coverage(same.variant, level: same.value)
+            evidence.sameValue = Double(same.value)
+            evidence.sameStandout = Double((same.value - mean) / deviation)
+            evidence.sameEntry = same.timeB
+            evidence.sameTone = toneAgreement(same)
+        }
+        if let top = best.first(where: { $0.stretch != 1 }) {
+            evidence.stretched = true
+            evidence.value = Double(top.value)
+            evidence.standout = Double((top.value - mean) / deviation)
+            evidence.variantStandout = variantStandout(top)
+            let rival = best.first { $0.stretch == top.stretch && $0.multiple == top.multiple && $0.shift != top.shift }
+            evidence.pitchMargin = Double(top.value - (rival?.value ?? top.value))
+            evidence.coverage = coverage(top.variant, level: top.value)
+            let semitones = 12 * log2(top.stretch)
+            evidence.tapeDeviation = min(Double(abs(top.shift)), abs(Double(top.shift) - semitones))
+            evidence.semitoneFit = abs(semitones - semitones.rounded())
+            evidence.logStretch = abs(log2(top.stretch))
+            evidence.entry = top.timeB
+            evidence.tone = toneAgreement(top)
+            let keyGap = ((trackA.key - trackB.key) % 12 + 12) % 12
+            evidence.keysAgree = trackA.keyConfidence >= 0.35 && trackB.keyConfidence >= 0.35 && ((top.shift % 12) + 12) % 12 == keyGap
+        }
+        if collectEvidence { lastEvidence = evidence }
+        // Without a database link, a match at another speed must pass the learned gate.
+        let gateOpen = known != nil || !sampleGateEnabled || SampleGate.accepts(evidence)
+        if debug, known == nil, evidence.stretched {
+            print(String(format: "   sample gate: logit %.2f (threshold %.2f) → %@", SampleGate.logit(evidence), SampleGate.threshold, gateOpen ? "open" : "closed"))
+        }
         if debug {
             print(String(format: "   similarity: %d alignments, mean %.3f, deviation %.3f", best.count, mean, deviation))
             for variant in variants {
@@ -844,7 +1136,20 @@ enum MixPlanner {
             // It must stand out from how alike the two songs are in general. Matches at another
             // speed are tried at many pitches, so chance has more goes at them: they need more.
             let standout = (match.value - mean) / deviation
-            guard standout >= (match.stretch == 1 ? 4 : 4.5) else {
+            let stretchBar: Float
+            // A match at another speed in songs the gate says share no material: offered as a
+            // tempo match (the playing song eases to the next one's tempo) at the old bar.
+            let tempoOnly = match.stretch != 1 && known == nil && sampleGateEnabled && !gateOpen
+            if known != nil {
+                stretchBar = 4.5
+            } else if sampleGateEnabled {
+                // The gate decides whether the pair shares material; standout only ranks where.
+                stretchBar = gateOpen ? 4 : Float(unlinkedStretchStandout)
+            } else {
+                stretchBar = Float(unlinkedStretchStandout)
+            }
+            let tooLate = match.stretch != 1 && known == nil && match.timeB > unlinkedStretchLatestEntry
+            guard standout >= (match.stretch == 1 ? 4 : stretchBar), !tooLate else {
                 if debug { print(String(format: "     (match %.3f at A %.0f s ↔ B %.0f s rejected: only %.1f σ)", match.value, match.timeA, match.timeB, standout)) }
                 continue
             }
@@ -928,6 +1233,13 @@ enum MixPlanner {
             // Entering at the matching passage is the point, so skipped material costs less here.
             plan.score = 1.12 + Double(match.value - 0.45) * 2 - 0.6 * lostA - 0.5 * skipB
                 + (match.stretch != 1 ? 0.1 : 0) + (match.timeB < 12 ? 0.08 : 0) + (known != nil ? 0.15 : 0)
+            if tempoOnly {
+                // Not a sample: no sample bonus, and below what the same tempo can offer.
+                plan.reason = .tempo
+                plan.score -= 0.35
+                let rate = plan.periodA / plan.periodB
+                plan.note = "The harmony lines up once the playing song \(change(rate, match.shift)) beforehand; the songs share no sampled material"
+            }
             result.append(plan)
             if result.count >= 3 { break }
         }
@@ -936,7 +1248,10 @@ enum MixPlanner {
         // where (a chopped or replayed sample under new production). Still offer the DJ's move
         // for it: ease the playing song to the next one's tempo, and bring the next one in
         // from its first bar once it is there.
-        if let record, !result.contains(where: { $0.reason == .sample }), b.count > 8, a.count > 16 {
+        // Not gated: a tempo ratio a whole number of semitones apart is its own evidence, and the
+        // approved P.Y.T. → Good Life plan comes from here when no database link is cached. It
+        // gave only about 6 % of the unlinked "samples" the gate was trained against.
+        if let record, known != nil || unlinkedRecordGuess, !result.contains(where: { $0.reason == .sample }), b.count > 8, a.count > 16 {
             // The pitch that best matches the two at that speed, if any does at all well.
             let candidates = [0, -1, 1, -2, 2, record.shift].compactMap { shift in best.first { $0.stretch == record.stretch && $0.shift == shift } }
             let top = candidates.max { $0.value < $1.value }
@@ -967,6 +1282,41 @@ enum MixPlanner {
                 let end = plan.outStart + plan.span(glide: true).outgoing
                 plan.score = 1.02 - 0.7 * trackA.energyShare(from: end, to: trackA.duration) - 0.5 * trackB.energyShare(from: 0, to: plan.inPoint)
                 result.append(plan)
+            }
+        }
+
+        // Tempos too far apart to beat-match as they are, but close enough for a DJ to ride the
+        // tempo across: the playing song eases slowly to the next one's tempo before a
+        // beat-matched overlap that leaves on a section change near its end. This replaces what
+        // unconfirmed "samples" used to do for such pairs, at honest speeds.
+        // Only when no passage lines up at the other tempo: a passage whose harmony lines up is
+        // evidence for where to mix, a ramp at the song's end is the fallback. (This was first
+        // justified by an owner-saved transition that turned out to be an accidental click.)
+        if known == nil, steadyBoth, rampMaxStretch > 0, !result.contains(where: { $0.reason == .sample || $0.reason == .tempo }), b.count > 8, a.count > 16 {
+            let readings = [1.0, 2.0, 0.5].map { (stretch: trackA.bpm / (trackB.bpm * $0), multiple: $0) }
+            if let reading = readings.min(by: { abs($0.stretch - 1) < abs($1.stretch - 1) }),
+               abs(reading.stretch - 1) > maxStretch, abs(reading.stretch - 1) <= rampMaxStretch {
+                let gap = abs(reading.stretch - 1)
+                let endA = min(trackA.audibleEnd, trackA.beats.last ?? trackA.audibleEnd)
+                let entry = (0 ..< b.count).first { b.time[$0] >= trackB.audibleStart - 0.05 }
+                let seconds = options.length.mixSeconds
+                let bars = (0 ..< a.count).filter { a.time[$0] > trackA.duration * 0.45 && a.time[$0] + seconds * reading.stretch * 0.7 <= endA }
+                let arrival = bars.last { a.boundary[$0] && trackA.energyShare(from: a.time[$0], to: trackA.duration) < 0.2 } ?? bars.last
+                if let arrival, let entry, var plan = tempoMatched(outStart: a.time[arrival], inPoint: b.time[entry], shift: 0, multiple: reading.multiple) {
+                    // Slower than a sample's approach, so the change isn't heard as a bend.
+                    plan.approach = min(45, max(16, 220 * gap))
+                    if plan.outStart - (plan.approach ?? 0) > trackA.duration * 0.15 {
+                        plan.applyShape(.blend)
+                        plan.preset = .auto
+                        plan.reason = .structure
+                        let rate = plan.periodA / plan.periodB
+                        plan.note = "The tempos are \(Int((gap * 100).rounded())) % apart: the playing song \(change(rate, 0)) gradually beforehand, then the next comes in on the bar"
+                        let end = plan.outStart + plan.span(glide: true).outgoing
+                        // Below a natural blend or a real match: DJs rarely move tempo this far.
+                        plan.score = 0.85 - 2.0 * (gap - maxStretch) - 0.7 * trackA.energyShare(from: end, to: trackA.duration) - 0.5 * trackB.energyShare(from: 0, to: plan.inPoint)
+                        result.append(plan)
+                    }
+                }
             }
         }
         return result
@@ -1040,7 +1390,8 @@ enum MixPlanner {
             let barsA = Bars(a, lyrics: nil)
             let barsB = Bars(b, lyrics: nil)
             if let indexA = barsA.beat.firstIndex(of: barA), let indexB = barsB.beat.firstIndex(of: barB) {
-                let shift = chooseShift(harmony(barsA, from: indexA, barsB, from: indexB, bars: plan.beats / 4), options: MixOptions(keyMatch: true)).shift
+                let multiple = fold(60 / a.bpm, 60 / b.bpm, forced: true)
+                let shift = chooseShift(harmony(barsA, from: indexA, barsB, from: indexB, bars: plan.beats / 4, multiple: multiple), options: MixOptions(keyMatch: true)).shift
                 plan.outgoingPitch = shift == 0 ? nil : Double(-shift)
             }
         }
@@ -1118,6 +1469,7 @@ enum MixPlanner {
             case .lyrics: kind = "Lyric match"
             case .similarity: kind = "Sound match"
             case .sample: kind = plan.known != nil ? "Known sample" : "Sample match"
+            case .tempo: kind = "Tempo match"
             case .ending: kind = "Fade"
             case .structure, .manual: kind = plan.outgoing.bass.isConstant ? "Mix" : "Blend"
             }

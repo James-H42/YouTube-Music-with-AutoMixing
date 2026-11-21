@@ -565,6 +565,11 @@ if CommandLine.arguments.contains("--exportifytest") {
     await ExportifyTest.run()
     exit(0)
 }
+// `--radiotest`: Start Radio, Autoplay, queue priority and mixing order, live (needs METROLIST_HOME).
+if CommandLine.arguments.contains("--radiotest") {
+    await RadioTest.run()
+    exit(0)
+}
 if let flag = CommandLine.arguments.firstIndex(of: "--videosynctest") {
     let query = CommandLine.arguments.count > flag + 1 ? CommandLine.arguments[flag + 1] : "Daft Punk Get Lucky official video"
     await VideoSyncTest.run(query: query)
@@ -636,6 +641,35 @@ if CommandLine.arguments.contains("--mixtest") {
 
 if CommandLine.arguments.contains("--mixplay") {
     await Probe.mixPlayTest()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--dumppcm") {
+    await AnalysisAudit.dumpPCM()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--beatmodeltest") {
+    await AnalysisAudit.beatModelTest()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--analysisaudit") {
+    await AnalysisAudit.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--mixaudit") {
+    await MixAudit.run()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--stemtest") {
+    StemTest.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--vocalresidue") {
+    StemTest.vocalResidue()
     exit(0)
 }
 

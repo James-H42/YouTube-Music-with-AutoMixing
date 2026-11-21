@@ -28,8 +28,44 @@ enum FeatureTests {
         csvParsing()
         filterCounts()
         headerCrop()
+        stemTiming()
         print(failures == 0 ? "all feature checks passed" : "\(failures) feature check(s) failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    /// 2026-11-21: stems in a transition. The outgoing vocals leave just before the incoming
+    /// ones start, never with both heard for a quarter of the overlap; stems that arrive after a
+    /// deck has read ahead change only what it reads next, faded in; a side without stems swaps
+    /// its bass on the EQ.
+    private static func stemTiming() {
+        // 16 beats; the incoming sings from 37 % of the overlap, the outgoing throughout.
+        let later = MixEngine.vocalHandOver(singingA: [0 ... 1], singingB: [0.37 ... 0.9], beats: 16, span: 8)
+        let cut = later.curve?.points.first { $0.y < 0.001 }?.x ?? -1
+        check(later.curve != nil && cut <= 0.37 && cut > 0.3 && later.curve!.value(at: 0.25) > 0.99,
+              "the outgoing vocals stay until the beat before the incoming vocals, then leave", "out at \(cut)")
+        let straight = MixEngine.vocalHandOver(singingA: [0 ... 1], singingB: [0 ... 1], beats: 16, span: 8)
+        let first = straight.curve?.points.first { $0.y < 0.001 }?.x ?? -1
+        check(first > 0 && first <= 1.0 / 16, "when both sing from the start, within the first beat", "out at \(first)")
+        let brief = MixEngine.vocalHandOver(singingA: [0 ... 0.5], singingB: [0.45 ... 1], beats: 16, span: 8)
+        check(brief.curve == nil, "less than a second of both singing leaves the outgoing vocals alone", String(format: "%.1f s together", brief.together))
+        var lanes = StemLanes()
+        lanes.vocals = MixCurve([(0, 1), (0.25, 0), (1, 0)])
+        let onTime = MixEngine.stemGains(lanes, start: 100, span: 10, beats: 16, readFrom: 95)
+        check(abs(onTime(101.25)[3] - 0.5) < 0.01, "stems in place in time follow the plan", "\(onTime(101.25)[3])")
+        // The deck has already read up to 103 s (30 % of the overlap): from there the move fades in
+        // over a beat instead of jumping to "vocals out".
+        let late = MixEngine.stemGains(lanes, start: 100, span: 10, beats: 16, readFrom: 103)
+        check(late(103.01)[3] > 0.9 && late(103.7)[3] < 0.01 && abs(late(103.3)[3] - 0.52) < 0.05,
+              "late stems fade in from where the deck has read to, over a beat", "\(late(103.01)[3]) \(late(103.3)[3]) \(late(103.7)[3])")
+        var plan = MixPlan(preset: .auto, outStart: 100, inPoint: 10, sync: true, beats: 16, seconds: 8, periodA: 0.5, periodB: 0.5,
+                           outgoing: DeckLanes(volume: MixCurve([(0, 1), (1, 0)])), incoming: DeckLanes(volume: MixCurve([(0, 0), (1, 1)])))
+        plan.outgoingStems = StemLanes(bass: MixCurve([(0, 1), (0.5, 1), (0.53, 0), (1, 0)]))
+        plan.incomingStems = StemLanes(bass: MixCurve([(0, 0), (0.5, 0), (0.53, 1), (1, 1)]))
+        plan.outgoing.bass = .constant(1)
+        plan.incoming.bass = .constant(1)
+        let fallback = MixEngine.withoutStems(plan, outgoing: true, incoming: false)
+        check(fallback.outgoing.bass.isConstant && fallback.incoming.bass.value(at: 0.2) < 0.01 && fallback.incoming.bass.value(at: 0.8) > 0.99,
+              "a side without its stems swaps its bass on the EQ")
     }
 
     private static func song(_ id: String, album: String?) -> Song {

@@ -33,6 +33,9 @@ final class AppSettings {
     var mixStyle: MixStyle { didSet { defaults.set(mixStyle.rawValue, forKey: "mixStyle") } }
     /// Let AutoMix nudge the next song's pitch when that makes the two keys agree.
     var mixKeyMatch: Bool { didSet { defaults.set(mixKeyMatch, forKey: "mixKeyMatch") } }
+    /// Separate the songs into stems during a transition (`StemSeparator`), so the outgoing
+    /// vocals can step aside and bass and drums hand over cleanly. Needs the stem model.
+    var mixStems: Bool { didSet { defaults.set(mixStems, forKey: "mixStems") } }
     /// Mix between consecutive tracks of one album too (off: albums play as sequenced).
     /// Ask MusicBrainz whether the two songs of a transition are known to share a sample.
     var mixSampleLookup: Bool { didSet { defaults.set(mixSampleLookup, forKey: "mixSampleLookup") } }
@@ -66,9 +69,11 @@ final class AppSettings {
     /// Loudness normalisation is on and not bypassed by bit-perfect output.
     var normalizes: Bool { normalizeVolume && !bitPerfect }
 
-    var mixOptions: MixOptions { MixOptions(length: mixLength, style: mixStyle, keyMatch: mixKeyMatch) }
+    var mixOptions: MixOptions {
+        MixOptions(length: mixLength, style: mixStyle, keyMatch: mixKeyMatch, stems: mixStems && StemSeparator.isInstalled)
+    }
 
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults = AppPaths.settings
 
     init() {
         defaults.register(defaults: [
@@ -82,6 +87,7 @@ final class AppSettings {
             "volume": 1.0,
             "showRomanization": true,
             "mixKeyMatch": true,
+            "mixStems": true,
             "mixSampleLookup": true,
             "mixOrdersQueue": true,
             "accountPlayback": true,
@@ -103,6 +109,7 @@ final class AppSettings {
         mixLength = MixLength(rawValue: defaults.string(forKey: "mixLength") ?? "") ?? .medium
         mixStyle = MixStyle(rawValue: defaults.string(forKey: "mixStyle") ?? "") ?? .smart
         mixKeyMatch = defaults.bool(forKey: "mixKeyMatch")
+        mixStems = defaults.bool(forKey: "mixStems")
         mixAlbums = defaults.bool(forKey: "mixAlbums")
         mixSampleLookup = defaults.bool(forKey: "mixSampleLookup")
         mixOrdersQueue = defaults.bool(forKey: "mixOrdersQueue")

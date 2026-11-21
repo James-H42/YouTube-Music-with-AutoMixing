@@ -151,6 +151,13 @@ album plays in order, unless "Mix within albums" is on in Settings.
 - `Mix/TrackAnalysis.swift` – on-device analysis of each cached track: tempo (autocorrelation
   checked at the half bar and bar), beat grid, bar phase, key, per-beat harmony (chroma), tone
   colour and band levels, section boundaries (Foote novelty) and a three-band waveform.
+- `Mix/BeatModel.swift` – a small neural beat and bar-line tracker, Beat This! (Foscarin,
+  Schlüter and Widmer, ISMIR 2024; MIT licence), run on the Mac through Core ML from
+  `Models/BeatThis.mlpackage` (10 MB, about 3 s per song, once). It corrects the built-in grid
+  where that counted the wrong pulse: a beat two-thirds or three-halves as long as the real one,
+  common in fast vocaloid and J-pop songs, which beat-matches on the wrong beats. Everything
+  else keeps the built-in grid; letting the model decide more was measured and made mixes worse
+  (see `Tools/ml/README.md`). Without the model files the app uses the built-in tracker alone.
 - `Mix/MixPlanner.swift` – proposes and ranks transitions for a pair: phrase-aligned beat-matched
   cross-fades anywhere in either song (scored for lost material, harmony, clashing vocals,
   energy, and length in seconds: two full songs on top of each other tire quickly), hand-overs on
@@ -180,7 +187,9 @@ album plays in order, unless "Mix within albums" is on in Settings.
   song before: tempo within beat-matching range (counting half and double time) weighs 50 %,
   key (same, relative or neighbouring; a diagonal step on the wheel; a semitone or two away
   if key matching is on) 30 %, a shared artist, credited or featured, 20 %, with a small pull
-  towards Autoplay's own order. The next song is left alone once its
+  towards Autoplay's own order. The weights were learned from DJ-made sequences
+  (`Tools/ml/train_sequencer.py`). The songs are ordered to follow the song just before them,
+  which is a Play Next song when one is waiting. The next song is left alone once its
   transition is near. Songs queued by hand, albums and playlists are never moved. Switch:
   Settings → "Order Autoplay songs for smoother mixes".
 - `Mix/MixPlan.swift` – a transition as data: mix points, length in bars, the approach, tempo
@@ -190,20 +199,31 @@ album plays in order, unless "Mix within albums" is on in Settings.
 - `Mix/MixEngine.swift` – two decks. Before the overlap the playing deck follows the approach
   (by position, so pausing and seeking are safe); the incoming track starts on an exact host
   time; a phase lock keeps the beats together; tempo and pitch ease back afterwards.
+- `Mix/StemSeparator.swift` – with "Mix with stems" on, the two stretches of a beat-matched
+  overlap are split into vocals, drums, bass and the rest by HT-Demucs (MIT licence) through
+  Core ML, as soon as the transition is decided. In the overlap the outgoing vocals step aside
+  on the beat before the incoming vocals start, the basslines swap halfway, and in blends the
+  drums hand over. If the stems aren't ready in time, the bass swap is made with the EQ.
+  Without the model (`Models/HTDemucs.mlpackage`, made with `Tools/ml/convert_demucs.py`)
+  transitions play whole songs.
 - `UI/Player/MixEditorView.swift` – the editor: drag a waveform to move its mix point, drag
   curve points, pick a preset or another of AutoMix's proposals. Picking a proposal or preset
   only tries it out for this play of the pair (Keep saves it); hand edits are kept per pair of
   songs in `mixes.json`.
 
 Play Next: a song chosen with Play Next (from the Mac, or your phone through Device Connect)
-is the next one played. Nothing moves it out of that place: AutoMix's ordering of Autoplay songs
-waits until it has played, shuffle leaves it in front (and switching shuffle off keeps it),
+is the next one played. Nothing moves it out of that place: AutoMix orders the Autoplay songs
+after it to follow it, shuffle leaves it in front (and switching shuffle off keeps it),
 and shared-queue guests' songs go behind it. Pressed while a transition is already audible, it
 goes straight after the song fading in. AutoMix mixes into it. If the next song changes so late
 that the best transition's mix point (or its tempo approach) has already gone by, the best
 transition still ahead is used for that play only, and noted in `mix.log`. If none is left, the
 song follows without one. The ranking, and your saved transitions, are not changed.
 Check: `--playnexttest`.
+
+Start Radio (in a song's menu) fills the queue with that song's YouTube Music radio at once,
+whether or not Autoplay is on, and keeps adding to it. Add to Queue puts songs after the ones
+you queued yourself but before what Autoplay or a radio lined up. Check: `--radiotest` (live).
 
 Videos in the queue: with "Prefer audio versions" on, a video is played as its audio release when
 one exists. That release is now looked up as soon as the video is next and put in the queue
@@ -284,6 +304,17 @@ Diagnostic switches on the binary (see also the AutoMix and playback sections):
     .build/debug/Metrolist --matchwhy <videoId>  # how a music video is matched to its song
 
 `METROLIST_HOME` redirects all of the app's storage, so tests never touch your own data.
+
+AutoMix measurement (run a release build; `Tools/run_audits.sh` runs them all):
+
+    .build/release/Metrolist --mixaudit Tools/groundtruth/groups.csv   # plans by style group
+    .build/release/Metrolist --mixaudit --approved                      # the approved reference pairs
+    .build/release/Metrolist --mixaudit --pairs-file pairs.tsv          # any pairs (optionally with your own transition points)
+    .build/release/Metrolist --analysisaudit Tools/groundtruth/silver   # beat grids against reference labels
+    .build/release/Metrolist --beatmodeltest refDir                     # Core ML model against Python
+    .build/release/Metrolist --dumppcm dir groups.csv                   # the app's own decoded audio, for Tools/ml
+
+`METROLIST_BEATMODEL=off` turns the beat model off; `METROLIST_MODELS=dir` points at another model.
 
 ## How it works
 

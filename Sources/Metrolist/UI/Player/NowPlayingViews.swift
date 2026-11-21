@@ -26,7 +26,12 @@ struct QueueView: View {
                     .onMove { source, destination in
                         if let first = source.first { player.moveInQueue(from: first, to: destination) }
                     }
-                    if model.settings.autoplay, player.repeatMode == .off {
+                    if player.radioSeed != nil {
+                        Label("Radio: similar songs keep coming", systemImage: "dot.radiowaves.left.and.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    } else if model.settings.autoplay, player.repeatMode == .off {
                         Label("Autoplay adds similar songs when the queue ends", systemImage: "infinity")
                             .font(.caption)
                             .foregroundStyle(.secondary)

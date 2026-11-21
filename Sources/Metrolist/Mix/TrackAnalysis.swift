@@ -3,7 +3,8 @@ import AVFoundation
 
 /// What AutoMix knows about a track: its tempo and beat grid, musical key and energy shape.
 struct TrackAnalysis: Codable {
-    static let currentVersion = 6
+    /// 7: beats and bar lines from the beat model when it is installed (`BeatModel`).
+    static let currentVersion = 7
 
     var version = TrackAnalysis.currentVersion
     var duration: Double
@@ -42,6 +43,13 @@ struct TrackAnalysis: Codable {
     var waveMid = Data()
     var waveHigh = Data()
     var waveRate: Double = 0
+    /// Beat index of every bar line, when bars were found one by one (a beat model or a
+    /// corrected grid), so pickups, short bars and changes of metre are followed. Nil means
+    /// every bar has four beats from `downbeatPhase`.
+    var barStarts: [Int]?
+    /// Where the beat grid came from: nil or "dsp" for the built-in tracker, "model:…" for the
+    /// beat model, "file:…" for a grid supplied from outside (corrections, experiments).
+    var beatSource: String?
 
     /// Camelot wheel code used by DJs for harmonic mixing, e.g. "8A".
     var camelot: String {
@@ -53,8 +61,14 @@ struct TrackAnalysis: Codable {
         ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"][key] + (isMinor ? " minor" : " major")
     }
 
+    /// Beat indices of the bar lines.
+    var barLines: [Int] {
+        if let barStarts, !barStarts.isEmpty { return barStarts }
+        return Array(stride(from: downbeatPhase, to: beats.count, by: 4))
+    }
+
     var downbeats: [Double] {
-        stride(from: downbeatPhase, to: beats.count, by: 4).map { beats[$0] }
+        barLines.filter { $0 < beats.count }.map { beats[$0] }
     }
 
     /// Index of the beat nearest to a time.
@@ -72,6 +86,15 @@ struct TrackAnalysis: Codable {
     /// Index of the bar line nearest to a time, as a beat index.
     func barIndex(nearest time: Double) -> Int {
         let beat = beatIndex(nearest: time)
+        if let barStarts, !barStarts.isEmpty {
+            // Nearest bar line in time, among the bars found one by one.
+            var best = barStarts[0]
+            for start in barStarts where start < beats.count {
+                if abs(beats[start] - time) < abs(beats[best] - time) { best = start }
+                if beats[start] > time + 8 { break }
+            }
+            return best
+        }
         let offset = ((beat - downbeatPhase) % 4 + 4) % 4
         let candidate = offset <= 1 ? beat - offset : beat + (4 - offset)
         return min(max(downbeatPhase, candidate), beats.count - 1)
@@ -191,7 +214,7 @@ actor TrackAnalyzer {
         if let cached = cached(videoId) { return cached }
         if failed.contains(videoId) { return nil }
         if let task = inFlight[videoId] { return await task.value }
-        let task = Task.detached(priority: .utility) { TrackAnalyzer.analyze(file: file) }
+        let task = Task.detached(priority: .utility) { TrackAnalyzer.analyze(file: file, videoId: videoId) }
         inFlight[videoId] = task
         let result = await task.value
         inFlight[videoId] = nil
@@ -260,12 +283,47 @@ actor TrackAnalyzer {
 
     // MARK: - Analysis
 
-    static func analyze(file: URL) -> TrackAnalysis? {
+    /// A beat grid from outside the DSP tracker: beat and bar-line times in seconds.
+    struct Grid {
+        var beats: [Double]
+        var downbeats: [Double]
+        var source: String
+    }
+
+    /// A grid supplied for a song, if any: a file in `METROLIST_BEATGRIDS` (for experiments, in
+    /// the format `Tools/ml/silver.py` writes).
+    static func suppliedGrid(videoId: String?) -> Grid? {
+        guard let videoId, let folder = ProcessInfo.processInfo.environment["METROLIST_BEATGRIDS"] else { return nil }
+        let url = URL(fileURLWithPath: folder).appendingPathComponent("\(videoId).json")
+        struct File: Decodable { var beats: [Double]; var downbeats: [Double]; var source: String? }
+        guard let data = try? Data(contentsOf: url), let file = try? JSONDecoder().decode(File.self, from: data), file.beats.count >= 16 else { return nil }
+        return Grid(beats: file.beats, downbeats: file.downbeats, source: "file:" + (file.source ?? url.lastPathComponent))
+    }
+
+    static func analyze(file: URL, videoId: String? = nil) -> TrackAnalysis? {
         guard let (samples, rate) = decodeMono(file: file) else { return nil }
+        if let grid = suppliedGrid(videoId: videoId) { return analyze(samples: samples, rate: rate, grid: grid) }
+        // The beat model, when installed, finds beats and bar lines one by one.
+        if let model = BeatModel.shared, let audio = AudioDecode.mono(file: file, rate: BeatModel.rate), let found = model.grid(samples: audio) {
+            return analyze(samples: samples, rate: rate, grid: found.grid)
+        }
         return analyze(samples: samples, rate: rate)
     }
 
-    static func analyze(samples: [Float], rate: Double) -> TrackAnalysis? {
+    /// Share of `reference` beats that have a beat in `other` within `tolerance` seconds.
+    static func agreement(_ reference: [Double], _ other: [Double], tolerance: Double = 0.07) -> Double {
+        guard !reference.isEmpty, !other.isEmpty else { return 0 }
+        var index = 0
+        var matched = 0
+        for time in reference {
+            while index + 1 < other.count, other[index + 1] <= time { index += 1 }
+            let nearest = min(abs(other[index] - time), index + 1 < other.count ? abs(other[index + 1] - time) : .infinity)
+            if nearest <= tolerance { matched += 1 }
+        }
+        return Double(matched) / Double(reference.count)
+    }
+
+    static func analyze(samples: [Float], rate: Double, grid: Grid? = nil) -> TrackAnalysis? {
         let duration = Double(samples.count) / rate
 
         // --- Energy shape ---------------------------------------------------------------
@@ -388,44 +446,95 @@ actor TrackAnalyzer {
         }
 
         // --- Beat tracking (dynamic programming, after Ellis 2007) -----------------------
-        var score = envelope
-        var backlink = [Int](repeating: -1, count: frameCount)
-        let tightness: Float = 100
-        let searchStart = Int((period * 2).rounded())
-        let searchEnd = max(1, Int((period / 2).rounded()))
-        for frame in 0 ..< frameCount {
-            var best = -Float.infinity
-            var bestIndex = -1
-            let from = max(0, frame - searchStart)
-            let to = frame - searchEnd
-            if to >= from {
-                for candidate in from ... to {
-                    let deviation = logf(Float(frame - candidate) / Float(period))
-                    let value = score[candidate] - tightness * deviation * deviation
-                    if value > best {
-                        best = value
-                        bestIndex = candidate
+        /// Beat frames following the onsets at a given beat length (in frames).
+        func track(period: Double) -> [Int] {
+            var score = envelope
+            var backlink = [Int](repeating: -1, count: frameCount)
+            let tightness: Float = 100
+            let searchStart = Int((period * 2).rounded())
+            let searchEnd = max(1, Int((period / 2).rounded()))
+            for frame in 0 ..< frameCount {
+                var best = -Float.infinity
+                var bestIndex = -1
+                let from = max(0, frame - searchStart)
+                let to = frame - searchEnd
+                if to >= from {
+                    for candidate in from ... to {
+                        let deviation = logf(Float(frame - candidate) / Float(period))
+                        let value = score[candidate] - tightness * deviation * deviation
+                        if value > best {
+                            best = value
+                            bestIndex = candidate
+                        }
+                    }
+                }
+                if bestIndex >= 0 {
+                    score[frame] = envelope[frame] + best
+                    backlink[frame] = bestIndex
+                }
+            }
+            let tailStart = max(0, frameCount - Int(period * 2))
+            var cursor = (tailStart ..< frameCount).max { score[$0] < score[$1] } ?? frameCount - 1
+            var frames: [Int] = []
+            while cursor >= 0 {
+                frames.append(cursor)
+                cursor = backlink[cursor]
+            }
+            return frames.reversed()
+        }
+        let beatFrames = track(period: period)
+
+        let frameTime: (Int) -> Double = { (Double($0 * hop) + Double(size) / 2) / rate }
+        let frameOf: (Double) -> Int = { min(frameCount - 1, max(0, Int((($0 * rate) - Double(size) / 2) / Double(hop) + 0.5))) }
+        var keptFrames = beatFrames.filter { frameTime($0) >= audibleStart - 0.05 && frameTime($0) <= audibleEnd }
+        var beats = keptFrames.map(frameTime)
+        var barStarts: [Int]?
+        if let grid, grid.source.hasPrefix("model:"), beats.count >= 16 {
+            // The beat model corrects the built-in grid only where the built-in tracker counted
+            // the wrong pulse: a beat two-thirds or three-halves as long as the model's (a dotted
+            // or triplet figure taken for the beat), which puts beats in the wrong places for any
+            // pairing. Measured on 198 songs against the larger model, that is the error behind
+            // most of the vocaloid tempo misses. Half or double time is left alone: the planner
+            // already counts the two against each other (`fold`), and conventions differ by
+            // style (hip-hop is usually counted in the half-time pulse).
+            // Letting the model decide more (any other pulse, its own gapped beats, the bar
+            // phase) was measured with `--mixaudit` and made mixes worse: twice as many fades on
+            // the owner's history pairs and different approved plans.
+            let heard = grid.beats.filter { $0 >= audibleStart - 0.05 && $0 <= audibleEnd }
+            if heard.count >= 16 {
+                func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
+                let modelPeriod = median(zip(heard.dropFirst(), heard).map { $0 - $1 })
+                let ownPeriod = median(zip(beats.dropFirst(), beats).map { $0 - $1 })
+                let ratio = ownPeriod / modelPeriod
+                let wrongPulse = abs(ratio - 1.5) <= 0.06 || abs(ratio - 2.0 / 3) <= 0.03
+                if wrongPulse, agreement(beats, heard) < 0.8 {
+                    // Follow the onsets again at the model's beat length, and keep that only if
+                    // it lands on the model's beats.
+                    let retracked = track(period: modelPeriod * rate / Double(hop))
+                        .filter { frameTime($0) >= audibleStart - 0.05 && frameTime($0) <= audibleEnd }.map(frameTime)
+                    if retracked.count >= 16, agreement(retracked, heard) >= 0.8 {
+                        beats = retracked
+                        keptFrames = beats.map(frameOf)
                     }
                 }
             }
-            if bestIndex >= 0 {
-                score[frame] = envelope[frame] + best
-                backlink[frame] = bestIndex
+        } else if let grid {
+            // A grid from the beat model or a correction replaces the tracker's beats; everything
+            // else is still measured from the audio, on those beats.
+            let supplied = grid.beats.filter { $0 >= audibleStart - 0.05 && $0 <= audibleEnd }
+            if supplied.count >= 16 {
+                beats = supplied
+                keptFrames = supplied.map(frameOf)
+                var starts: [Int] = []
+                var cursor = 0
+                for time in grid.downbeats.sorted() {
+                    while cursor + 1 < beats.count, abs(beats[cursor + 1] - time) <= abs(beats[cursor] - time) { cursor += 1 }
+                    if abs(beats[cursor] - time) < 0.1, starts.last != cursor { starts.append(cursor) }
+                }
+                if starts.count >= 4 { barStarts = starts }
             }
         }
-        let tailStart = max(0, frameCount - Int(period * 2))
-        var cursor = (tailStart ..< frameCount).max { score[$0] < score[$1] } ?? frameCount - 1
-        var beatFrames: [Int] = []
-        while cursor >= 0 {
-            beatFrames.append(cursor)
-            cursor = backlink[cursor]
-        }
-        beatFrames.reverse()
-
-        let frameTime: (Int) -> Double = { (Double($0 * hop) + Double(size) / 2) / rate }
-        let keptFrames = beatFrames.filter { frameTime($0) >= audibleStart - 0.05 && frameTime($0) <= audibleEnd }
         guard keptFrames.count >= 16 else { return nil }
-        let beats = keptFrames.map(frameTime)
         let beatStrength: [Float] = keptFrames.map { frame in
             (max(0, frame - 1) ... min(frameCount - 1, frame + 1)).map { envelope[$0] }.max() ?? 0
         }
@@ -443,7 +552,13 @@ actor TrackAnalyzer {
             let window = (max(0, frame - 2) ... min(frameCount - 1, frame + 2)).map { lowFlux[$0] }.max() ?? 0
             phaseStrength[index % 4] += window
         }
-        let downbeatPhase = phaseStrength.indices.max { phaseStrength[$0] < phaseStrength[$1] } ?? 0
+        var downbeatPhase = phaseStrength.indices.max { phaseStrength[$0] < phaseStrength[$1] } ?? 0
+        if let barStarts {
+            // With bars found one by one, the phase is only a summary: the most common one.
+            var counts = [Int](repeating: 0, count: 4)
+            for start in barStarts { counts[start % 4] += 1 }
+            downbeatPhase = counts.indices.max { counts[$0] < counts[$1] } ?? 0
+        }
 
         // --- Key and harmony (chromagram against Krumhansl-Kessler profiles) --------------
         let harmony = chromagram(samples: samples, rate: rate)
@@ -499,9 +614,10 @@ actor TrackAnalyzer {
         }
 
         // --- Sections: where consecutive bars stop resembling each other --------------------
+        let barList = barStarts ?? Array(stride(from: downbeatPhase, through: beatCount - 4, by: 4))
         let boundaries = sectionBoundaries(
             chroma: chromaValues, timbre: timbreValues, level: zip(beatLow, zip(beatMid, beatHigh)).map { ($0 + $1.0 + $1.1) / 3 },
-            beatCount: beatCount, phase: downbeatPhase
+            beatCount: beatCount, bars: barList
         )
 
         // --- Waveform for the mix editor -----------------------------------------------------
@@ -525,20 +641,27 @@ actor TrackAnalyzer {
             beatTimbre: FloatMatrix(rows: beatCount, columns: 7, values: timbreValues),
             beatLow: beatLow, beatMid: beatMid, beatHigh: beatHigh, boundaries: boundaries,
             waveLow: waveEnvelope(wide[0]), waveMid: waveEnvelope(wide[1]), waveHigh: waveEnvelope(wide[2]),
-            waveRate: fps / Double(waveStep)
+            waveRate: fps / Double(waveStep),
+            barStarts: barStarts, beatSource: barStarts != nil || grid != nil ? grid?.source : nil
         )
     }
 
     /// Finds bar lines where the music changes, from a bar-by-bar self-similarity matrix
     /// scanned with a checkerboard kernel (Foote novelty). Returned as beat indices.
-    private static func sectionBoundaries(chroma: [Float], timbre: [Float], level: [Float], beatCount: Int, phase: Int) -> [Int] {
-        let barCount = (beatCount - phase) / 4
+    private static func sectionBoundaries(chroma: [Float], timbre: [Float], level: [Float], beatCount: Int, bars: [Int]) -> [Int] {
+        // Bars that fit in the track; the last one needs its own length of beats after it.
+        let kept = bars.enumerated().compactMap { index, start -> (start: Int, span: Int)? in
+            let next = index + 1 < bars.count ? bars[index + 1] : start + 4
+            return start >= 0 && next <= beatCount && next > start ? (start, min(8, next - start)) : nil
+        }
+        let starts = kept.map(\.start)
+        let barCount = starts.count
         guard barCount >= 12 else { return [] }
         let width = 12 + 7 + 1
         var features = [Float](repeating: 0, count: barCount * width)
         for bar in 0 ..< barCount {
-            for step in 0 ..< 4 {
-                let beat = phase + bar * 4 + step
+            for step in 0 ..< kept[bar].span {
+                let beat = starts[bar] + step
                 for pitch in 0 ..< 12 { features[bar * width + pitch] += chroma[beat * 12 + pitch] }
                 for band in 0 ..< 7 { features[bar * width + 12 + band] += timbre[beat * 7 + band] * 0.35 }
                 features[bar * width + 19] += level[beat] * 0.6
@@ -574,7 +697,7 @@ actor TrackAnalyzer {
         for bar in half ..< barCount - half where novelty[bar] > threshold {
             let window = novelty[max(0, bar - 3) ... min(barCount - 1, bar + 3)]
             guard novelty[bar] >= (window.max() ?? 0), bar - lastBar >= 4 else { continue }
-            result.append(phase + bar * 4)
+            result.append(starts[bar])
             lastBar = bar
         }
         return result

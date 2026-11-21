@@ -148,7 +148,14 @@ final class PlayerController {
     @ObservationIgnored private var resumePosition = 0.0
     @ObservationIgnored private var unshuffledQueue: [Song]?
     @ObservationIgnored private var radioContinuation: String?
-    @ObservationIgnored private var isExtending = false
+    /// Set while the queue is a radio the listener started (Start Radio). A radio fills the
+    /// queue at once and keeps going whatever the Autoplay setting says, as in YouTube Music.
+    private(set) var radioSeed: String?
+    /// Counts replacements of the whole queue, so a radio or Autoplay page asked for the queue
+    /// before is never added to the one after it.
+    @ObservationIgnored private var queueGeneration = 0
+    /// The queue generation an Autoplay or radio request is out for, if one is.
+    @ObservationIgnored private var extendingGeneration: Int?
     /// Songs Autoplay added, and the order it gave them in. Only these are re-ordered for mixing.
     @ObservationIgnored private var autoQueued: [String: Int] = [:]
     @ObservationIgnored private var autoQueueCounter = 0
@@ -183,6 +190,9 @@ final class PlayerController {
         self.settings = settings
         volume = settings.volume
         engine.volume = Float(settings.volume)
+        // Core ML compiles the stem model for the GPU on first use (about 20 s); do that now so
+        // the first transition has its stems in time. Not while bit-perfect output pauses AutoMix.
+        if settings.mixes, settings.mixStems { StemSeparator.warmUp() }
 
         engine.onStatus = { [weak self] status in
             MainActor.assumeIsolated { self?.handle(status) }
@@ -348,7 +358,7 @@ final class PlayerController {
     private func pairKey(_ current: Song, _ next: Song) -> String { "\(current.id)|\(next.id)" }
 
     private func candidateKey(_ current: Song, _ next: Song) -> String {
-        "\(pairKey(current, next))|\(settings.mixLength.rawValue)|\(settings.mixStyle.rawValue)|\(settings.mixKeyMatch)"
+        "\(pairKey(current, next))|\(settings.mixLength.rawValue)|\(settings.mixStyle.rawValue)|\(settings.mixKeyMatch)|\(settings.mixStems)"
             + (sampleRelation(current, next) == nil ? "" : "|sample")
     }
 
@@ -562,6 +572,10 @@ final class PlayerController {
     /// Jumps to just before the upcoming transition so it can be heard.
     func previewMix(lead: Double = 5) {
         guard let plan = nextMixPlan else { return }
+        // Stems still being separated need about 8 s (separating, then the 3 s a deck reads
+        // ahead) to be in place for the whole overlap; start the preview earlier until they are.
+        var lead = lead
+        if settings.mixStems, MixEngine.usesStems(plan), !stemsSeparated(for: plan) { lead = max(lead, 10) }
         // A plan that eases the song to another speed first has to be heard from before that.
         let approach = plan.approach ?? 0
         seek(to: max(0, plan.outStart - approach - (approach > 0 ? min(lead, 3) : lead)))
@@ -601,24 +615,27 @@ final class PlayerController {
     private var sequencesAutoQueue: Bool { settings.mixes && settings.mixOrdersQueue && settings.mixStyle == .smart }
 
     /// Looks a few Autoplay songs ahead, has them fetched and analysed, and moves the one that
-    /// mixes best out of the playing song to the front (`MixSequencer`).
+    /// mixes best out of the song before them to the front (`MixSequencer`).
     private func sequenceAutoQueue() {
         // Videos aren't mixed, so there is no order to choose for mixing.
-        guard sequencesAutoQueue, !isVideoSession, let currentIndex, let current = currentSong else { return }
-        let start = currentIndex + 1
-        // Play Next songs (and one already fading in) come first; Autoplay's order is chosen
-        // to follow the playing song, so it waits until they have played.
-        guard firstFlexibleIndex == start else { return }
+        guard sequencesAutoQueue, !isVideoSession, let currentIndex, currentSong != nil else { return }
+        // Play Next songs (and one already fading in) keep their places at the front. Autoplay's
+        // songs after them are ordered to follow the last of them, the song they will mix out of.
+        let start = firstFlexibleIndex
+        guard start > currentIndex, start <= queue.count else { return }
+        let anchor = queue[start - 1]
         var end = start
         while end < queue.count, end - start < MixSequencer.pool, autoQueued[queue[end].id] != nil { end += 1 }
         guard end - start >= 2 else { return }
         let pool = Array(queue[start ..< end])
-        // Fetch them one at a time, so looking ahead never crowds out what is playing.
-        if position > 3, !pool.contains(where: { media.isFetching($0.id) }),
-           let missing = pool.first(where: { media.records[$0.id] == nil && !media.failed.contains($0.id) }) {
+        // Fetch them one at a time, so looking ahead never crowds out what is playing. The song
+        // they follow comes first when it isn't the playing one (a Play Next song).
+        let wanted = (start > currentIndex + 1 ? [anchor] : []) + pool
+        if position > 3, !wanted.contains(where: { media.isFetching($0.id) }),
+           let missing = wanted.first(where: { media.records[$0.id] == nil && !media.failed.contains($0.id) }) {
             media.prefetch(videoId: missing.id)
         }
-        for song in pool where analyses[song.id] == nil && !analysisRequested.contains(song.id) {
+        for song in [anchor] + pool where analyses[song.id] == nil && !analysisRequested.contains(song.id) {
             guard let record = media.records[song.id] else { continue }
             analysisRequested.insert(song.id)
             let file = AppPaths.media.appendingPathComponent(record.fileName)
@@ -626,21 +643,24 @@ final class PlayerController {
                 if let analysis = await TrackAnalyzer.shared.analysis(videoId: song.id, file: file) { analyses[song.id] = analysis }
             }
         }
-        guard let a = analyses[current.id] else { return }
-        // Leave the next song alone once its transition is under way or about to be, or
-        // when the listener has chosen how these two are mixed.
-        if mixActivity != nil || (duration > 0 && position > duration - 30) { return }
-        if let plan = nextMixPlan, position > plan.outStart - (plan.approach ?? 0) - 20 { return }
-        if customMixes[pairKey(current, pool[0])] != nil || mixAudition != nil { return }
+        guard let a = analyses[anchor.id] else { return }
+        // When the first of them is the next song, leave it alone once its transition is under
+        // way or about to be. Either way, not when the listener has chosen how they are mixed.
+        if start == currentIndex + 1 {
+            if mixActivity != nil || (duration > 0 && position > duration - 30) { return }
+            if let plan = nextMixPlan, position > plan.outStart - (plan.approach ?? 0) - 20 { return }
+            if mixAudition != nil { return }
+        }
+        if customMixes[pairKey(anchor, pool[0])] != nil { return }
         let known = pool.filter { analyses[$0.id] != nil }.map(\.id).sorted()
-        let signature = "\(current.id)|\(pool.map(\.id).sorted().joined(separator: ","))|\(known.joined(separator: ","))"
+        let signature = "\(anchor.id)|\(pool.map(\.id).sorted().joined(separator: ","))|\(known.joined(separator: ","))"
         guard signature != sequencedFor, !known.isEmpty else { return }
         sequencedFor = signature
-        let ordered = MixSequencer.order(after: current, a, pool: pool.map { ($0, analyses[$0.id], autoQueued[$0.id] ?? 0) }, keyMatch: settings.mixKeyMatch)
+        let ordered = MixSequencer.order(after: anchor, a, pool: pool.map { ($0, analyses[$0.id], autoQueued[$0.id] ?? 0) }, keyMatch: settings.mixKeyMatch)
         guard ordered.map(\.item.id) != pool.map(\.id) else { return }
         queue.replaceSubrange(start ..< end, with: ordered.map(\.item))
         if let first = ordered.first {
-            MixLog.write("autoplay order: \(first.item.title) moved up to follow \(current.title)\(first.fit.map { " (\($0.note))" } ?? "")")
+            MixLog.write("autoplay order: \(first.item.title) moved up to follow \(anchor.title)\(first.fit.map { " (\($0.note))" } ?? "")")
         }
         persist()
     }
@@ -795,6 +815,9 @@ final class PlayerController {
         queue = songs
         playNextIds = []
         radioContinuation = nil
+        radioSeed = nil
+        queueGeneration += 1
+        extendBlockedUntil = .distantPast
         library.remember(songs)
         start(index: index)
     }
@@ -804,8 +827,13 @@ final class PlayerController {
         play([song], chosen: true)
     }
 
+    /// Plays the song and fills the queue with its YouTube Music radio straight away, with or
+    /// without Autoplay. Before 2026-11-21 this only played the song: the radio came from
+    /// Autoplay, so with Autoplay off the queue held the one song.
     func playRadio(for song: Song) {
         play([song])
+        radioSeed = song.id
+        extendQueueIfNeeded()
     }
 
     func playNext(_ songs: [Song]) {
@@ -838,7 +866,11 @@ final class PlayerController {
             play(songs)
             return
         }
-        queue.append(contentsOf: songs)
+        // Songs the listener adds go after their own queue but before what Autoplay or a radio
+        // lined up, as in YouTube Music: Autoplay's songs stay at the end, where AutoMix orders them.
+        var at = queue.count
+        while at > firstFlexibleIndex, autoQueued[queue[at - 1].id] != nil { at -= 1 }
+        queue.insert(contentsOf: songs, at: at)
         markQueuedByHand(songs.map(\.id), playNext: false)
         adoptVideos(songs)
         unshuffledQueue?.append(contentsOf: songs)
@@ -923,6 +955,9 @@ final class PlayerController {
         queue.removeSubrange((currentIndex + 1)...)
         playNextIds = []
         radioContinuation = nil
+        // Clearing ends a radio too, and a page already asked for is not added afterwards.
+        radioSeed = nil
+        queueGeneration += 1
         persist()
     }
 
@@ -1289,6 +1324,7 @@ final class PlayerController {
             Scrobbler.shared.scrobble(playing, duration: duration, started: listenStartedAt)
         }
         prepareMix()
+        separateStemsAhead()
         // Hand the next track to the engine ahead of time: with a mix plan it is cued for a
         // DJ-style transition, otherwise it follows without a gap.
         var key: String?
@@ -1315,6 +1351,31 @@ final class PlayerController {
         extendQueueIfNeeded()
     }
 
+    /// The transition whose stems were last separated ahead of time.
+    @ObservationIgnored private var stemsAheadFor: String?
+
+    /// Whether both stretches of the upcoming transition are already separated.
+    private func stemsSeparated(for plan: MixPlan) -> Bool {
+        guard let currentIndex, currentIndex + 1 < queue.count,
+              let first = media.records[queue[currentIndex].id], let second = media.records[queue[currentIndex + 1].id] else { return false }
+        let stretches = MixEngine.stemStretches(plan)
+        return StemSeparator.isCached(file: AppPaths.media.appendingPathComponent(first.fileName), from: stretches.outgoing.start, to: stretches.outgoing.end)
+            && StemSeparator.isCached(file: AppPaths.media.appendingPathComponent(second.fileName), from: stretches.incoming.start, to: stretches.incoming.end)
+    }
+
+    /// Has the stems of the coming transition separated as soon as it is decided and both songs
+    /// are on disk, so they are in place however soon it is cued (a preview jumps to 5 s before
+    /// it, and separating takes 3 to 5 s; on 2026-11-21 stems arrived late and vocals bled).
+    private func separateStemsAhead() {
+        guard settings.mixStems, let mix = nextMixPlan, MixEngine.usesStems(mix), let currentIndex, currentIndex + 1 < queue.count,
+              let first = media.records[queue[currentIndex].id], let second = media.records[queue[currentIndex + 1].id]
+        else { return }
+        let key = String(format: "%@|%@|%.3f|%.3f|%d|%.5f|%.5f", queue[currentIndex].id, queue[currentIndex + 1].id, mix.outStart, mix.inPoint, mix.beats, mix.periodA, mix.periodB)
+        guard key != stemsAheadFor else { return }
+        stemsAheadFor = key
+        engine.separateStemsAhead(mix, current: AppPaths.media.appendingPathComponent(first.fileName), next: AppPaths.media.appendingPathComponent(second.fileName))
+    }
+
     /// The album a list of songs makes up: started from an album page, or two or more songs
     /// that all come from the same album. Nil for playlists, mixes and single songs.
     static func albumId(of songs: [Song], source: String?) -> String? {
@@ -1323,29 +1384,48 @@ final class PlayerController {
         return songs.allSatisfy { $0.album?.id == first } ? first : nil
     }
 
-    /// Appends radio tracks when the queue is about to run out.
+    /// Appends radio tracks when the queue is about to run out (Autoplay), or as soon as the
+    /// listener starts a radio.
     private func extendQueueIfNeeded() {
-        guard settings.autoplay, !isExtending, repeatMode == .off, playingAlbumId == nil,
+        let generation = queueGeneration
+        let radio = radioSeed != nil
+        guard settings.autoplay || radio, extendingGeneration != generation, repeatMode == .off || radio, playingAlbumId == nil,
               // With AutoMix choosing the order, keep enough lined up to choose between.
               let currentIndex, queue.count - currentIndex <= (sequencesAutoQueue ? MixSequencer.pool + 1 : 2), let seed = queue.last,
               NetworkStatus.shared.isOnline, Date() >= extendBlockedUntil
         else { return }
-        isExtending = true
+        extendingGeneration = generation
         let continuation = radioContinuation
+        // A radio's first page comes from the song it was started for, even if that song has
+        // since been swapped for its audio release.
+        let seedId = continuation == nil && queue.count == 1 ? (radioSeed ?? seed.id) : seed.id
         Task {
-            defer { isExtending = false }
+            defer { if extendingGeneration == generation { extendingGeneration = nil } }
             let page: QueuePage?
             if let continuation {
                 page = try? await YTMusic.queue(continuation: continuation)
             } else {
-                page = try? await YTMusic.radio(for: seed.id)
+                page = try? await YTMusic.radio(for: seedId)
             }
+            // The queue was replaced while this was asked for: this page belongs to the old one.
+            guard generation == queueGeneration else { return }
             guard let page else {
                 extendBlockedUntil = Date().addingTimeInterval(30)
                 return
             }
-            let existing = Set(queue.map(\.id))
-            var unseen = page.songs.filter { !existing.contains($0.id) }
+            // A video in the queue may have been swapped for its audio release, and a radio page
+            // lists songs under either id: neither may come round again.
+            var existing = Set(queue.map(\.id))
+            for (video, audio) in counterparts { if let audio, existing.contains(audio.id) { existing.insert(video) } }
+            var unseen: [Song] = []
+            var listed = existing
+            for song in page.songs {
+                let other = page.counterparts[song.id]?.id
+                guard !listed.contains(song.id), !(other.map(listed.contains) ?? false) else { continue }
+                listed.insert(song.id)
+                if let other { listed.insert(other) }
+                unseen.append(song)
+            }
             // After a music video, only music videos: each song's video counterpart (as
             // YouTube Music's own audio/video switch pairs them), or the video itself.
             let videosOnly = isVideoSession
