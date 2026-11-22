@@ -1,0 +1,102 @@
+# Reference mixes gathered on 2026-11-21 (see docs/AUTOMIX_REFERENCE_MIXES.md). Same columns as
+# common-mixes.tsv: group, kind, query A (played first), query B. Queries resolve to YouTube Music
+# audio releases through `Metrolist --analyze "query"`.
+#
+# Kinds:
+#   dj-sample     B samples A, and a DJ played A straight into B in several sets (MixesDB)
+#   sample        B samples A (checked against two or more public write-ups)
+#   interpolation B re-records or rearranges A (covers, quotes, rearrangements)
+#   dj-version    a DJ played a song straight into another version of it (remix, edit)
+#   dj-recurring  a DJ repeated this transition in two or more different sets (MixesDB)
+#   soulmix       consecutive on Kanye West & A-Trak, Welcome To Kanye's Soul Mix Show (2006),
+#                 where every record is played at the speed Kanye sampled it
+#
+# DJ Jazzy Jeff, 23 sets with tracklists on MixesDB: the source record, then the song built on it.
+hiphop	dj-sample	Gap Mangione Diana in the Autumn Wind	Slum Village Fall in Love
+hiphop	dj-sample	The J.B.'s The Grunt	Public Enemy Night of the Living Baseheads
+hiphop	dj-sample	Ronnie Foster Mystic Brew	A Tribe Called Quest Electric Relaxation
+hiphop	dj-sample	Ahmad Jamal Ghetto Child	Common They Say
+hiphop	dj-sample	Honey Cone Innocent 'Til Proven Guilty	Common Testify
+hiphop	dj-sample	Screamin' Jay Hawkins I Put a Spell on You	The Notorious B.I.G. Kick in the Door
+hiphop	dj-sample	Grace Jones My Jamaican Guy	LL Cool J Doin' It
+# Sources on the Soul Mix Show into the Kanye West productions that sample them.
+hiphop	sample	Bobby Bland Ain't No Love in the Heart of the City	JAY-Z Heart of the City (Ain't No Love)
+hiphop	sample	Luther Vandross A House Is Not a Home	Twista Slow Jamz
+# Japanese and other non-Western sources (two or more write-ups each).
+jpop	sample	Ryuichi Sakamoto Bibo no Aozora	Trey Songz Can't Be Friends
+jpop	sample	Yellow Magic Orchestra Firecracker	Jennifer Lopez I'm Real
+jpop	interpolation	Martin Denny Firecracker	Yellow Magic Orchestra Firecracker
+jpop	interpolation	Morning Musume Soda! We're Alive	Kenshi Yonezu KICK BACK
+vocaloid	interpolation	Loituma Ievan Polkka	Hatsune Miku Ievan Polkka
+jpop	interpolation	Miki Matsubara Mayonaka no Door Stay With Me	Rainych Mayonaka no Door Stay With Me
+# Original into remix, as played in DJ sets (Porter Robinson, Madeon, DJ Jazzy Jeff).
+jpop	dj-version	Kyary Pamyu Pamyu Yume no Hajima Ring Ring	Kyary Pamyu Pamyu Yume no Hajima Ring Ring Yandere Remix
+electronic	dj-version	Porter Robinson Sad Machine	Porter Robinson Sad Machine Anamanaguchi Remix
+electronic	dj-version	M83 Midnight City	M83 Midnight City Eric Prydz Remix
+electronic	dj-version	Porter Robinson Mat Zo Easy	Porter Robinson Mat Zo Easy Botnek Remix
+electronic	dj-version	Madeon Finale	Madeon Finale Netsky Remix
+hiphop	dj-version	Kanye West Mercy	Kanye West Mercy RL Grime Salva Remix
+pop	dj-version	Michael Jackson Rock With You Masters At Work Remix	Michael Jackson Rock With You
+# Transitions a DJ repeated in different sets (rebroadcasts counted once).
+electronic	dj-recurring	The Knocks Dancing With The DJ	M83 Midnight City
+rock	dj-recurring	The Killers Mr. Brightside	Yelle Que veux-tu
+electronic	dj-recurring	Knife Party Destroy Them With Lazers	Marcel Woods Black Angus
+electronic	dj-recurring	Marcel Woods Black Angus	Gareth Emery Ashley Wallbridge Mansion
+electronic	dj-recurring	Touch Sensitive Pizza Guy	Daft Punk Emotion
+electronic	dj-recurring	Slow Magic On Yr Side	Fu_Mou Green Night Parade
+electronic	dj-recurring	Oliver I Need You	Daft Punk Burnin'
+electronic	dj-recurring	Porter Robinson Language	Kaskade Skrillex Lick It
+rock	dj-recurring	ZZ Top Cheap Sunglasses	Rage Against the Machine Bulls on Parade
+rock	dj-recurring	Yes Leave It	Simple Minds Alive and Kicking
+rock	dj-recurring	Simple Minds Alive and Kicking	Talking Heads Burning Down the House
+rock	dj-recurring	Talking Heads Burning Down the House	Morrissey Suedehead
+rock	dj-recurring	Steve Miller Band Fly Like an Eagle	Rush Tom Sawyer
+rock	dj-recurring	The Police Voices Inside My Head	Pink Floyd Another Brick in the Wall Part 1
+hiphop	dj-recurring	Wu-Tang Clan C.R.E.A.M.	YGz Ghetto Celeb
+hiphop	dj-recurring	Survivor Eye of the Tiger	LL Cool J Mama Said Knock You Out
+hiphop	dj-recurring	Dr. Dre Deep Cover	Dr. Dre Nuthin' But a G Thang
+hiphop	dj-recurring	B.T. Express Do It ('Til You're Satisfied)	Stevie Wonder My Cherie Amour
+electronic	dj-version	Swedish House Mafia One	Swedish House Mafia One Congorock Remix
+electronic	dj-version	Swedish House Mafia Save The World	Swedish House Mafia Save The World Knife Party Remix
+electronic	dj-recurring	Swedish House Mafia Miami 2 Ibiza	Axwell Nothing But Love
+electronic	dj-recurring	Axwell Nothing But Love	Steve Angello Knas
+electronic	dj-recurring	Axwell Nothing But Love	Avicii Sebastien Drums My Feelings For You
+electronic	dj-recurring	Alesso Dynamite	Sebastian Ingrosso Kidsos
+electronic	dj-recurring	Sub Focus Turn Back Time	Avicii You Make Me
+electronic	dj-recurring	Knife Party Internet Friends	deadmau5 Where My Keys
+electronic	dj-recurring	Swedish House Mafia One	Imogen Heap Hide and Seek Otto Knows Remix
+electronic	dj-recurring	Calvin Harris Sweet Nothing	Pyero Bura
+electronic	dj-recurring	Michael Woods No Access	Calvin Harris You Used To Hold Me
+electronic	dj-recurring	Les Petits Pilous Wake Up	Calvin Harris I'm Not Alone
+electronic	dj-recurring	Little By Little Bang The Box	Rogerseventytwo You Take Me Higher
+electronic	dj-recurring	Rogerseventytwo You Take Me Higher	Little Simz Woman Mochakk Remix
+electronic	dj-recurring	Little Simz Woman Mochakk Remix	Dan Be Ooh
+electronic	dj-recurring	Dan Be Ooh	Disclosure She's Gone, Dance On
+electronic	dj-recurring	Shee Close My Eyes	Disclosure Feel Your Love
+electronic	dj-recurring	Tyree Git It Right	Stevie Wonder All I Do
+hiphop	dj-recurring	Scarface Guess Who's Back	The Notorious B.I.G. Big Poppa
+hiphop	dj-recurring	Royce da 5'9" Boom	OutKast ATLiens
+hiphop	dj-recurring	OutKast ATLiens	Nas Made You Look
+# Kanye West & A-Trak, Welcome To Kanye's Soul Mix Show (2006), in order.
+hiphop	soulmix	Nina Simone Sinnerman	Al Green I Wish You Were Here
+hiphop	soulmix	Al Green I Wish You Were Here	Honey Cone Innocent 'Til Proven Guilty
+hiphop	soulmix	Honey Cone Innocent 'Til Proven Guilty	Graham Nash Chicago
+hiphop	soulmix	Graham Nash Chicago	Bobby Bland Ain't No Love in the Heart of the City
+hiphop	soulmix	Bobby Bland Ain't No Love in the Heart of the City	David Ruffin Common Man
+hiphop	soulmix	David Ruffin Common Man	William Bell Mavis Staples Strung Out
+hiphop	soulmix	William Bell Mavis Staples Strung Out	Hank Crawford Wildflower
+hiphop	soulmix	Hank Crawford Wildflower	Ahmad Jamal Ghetto Child
+hiphop	soulmix	Ahmad Jamal Ghetto Child	Mandrill Peace and Love
+hiphop	soulmix	Mandrill Peace and Love	The Kay-Gees Heavenly Dream
+hiphop	soulmix	The Kay-Gees Heavenly Dream	The Whatnauts I'll Erase Away Your Pain
+hiphop	soulmix	The Whatnauts I'll Erase Away Your Pain	Luther Vandross A House Is Not a Home
+hiphop	soulmix	Luther Vandross A House Is Not a Home	Chaka Khan Through the Fire
+hiphop	soulmix	Chaka Khan Through the Fire	Bill Withers Rosie
+hiphop	soulmix	Bill Withers Rosie	Etta James My Funny Valentine
+hiphop	soulmix	Etta James My Funny Valentine	Gil Scott-Heron Home Is Where the Hatred Is
+hiphop	soulmix	Gil Scott-Heron Home Is Where the Hatred Is	Linda Lewis Old Smokey
+hiphop	soulmix	Linda Lewis Old Smokey	The New York Community Choir Since You Came in My Life
+hiphop	soulmix	The New York Community Choir Since You Came in My Life	Curtis Mayfield Move On Up
+hiphop	soulmix	Curtis Mayfield Move On Up	New Birth It's Impossible
+hiphop	soulmix	New Birth It's Impossible	Marvin Gaye Distant Lover
+hiphop	soulmix	Marvin Gaye Distant Lover	Lenny Williams 'Cause I Love You

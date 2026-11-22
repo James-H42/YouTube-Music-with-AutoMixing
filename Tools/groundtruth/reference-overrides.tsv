@@ -1,0 +1,14 @@
+# Queries whose first YouTube Music search hit (`Metrolist --analyze "query"`) is the wrong
+# recording, checked by reading the resolved titles on 2026-11-21. Columns: query, then a video id
+# to use instead, or "skip" to leave every pair with that query out. Read by
+# `reference_mixes.py resolve --overrides`.
+Ahmad Jamal Ghetto Child	skip
+Loituma Ievan Polkka	skip
+Jennifer Lopez I'm Real	skip
+Kyary Pamyu Pamyu Yume no Hajima Ring Ring Yandere Remix	skip
+Porter Robinson Sad Machine Anamanaguchi Remix	skip
+Kanye West Mercy RL Grime Salva Remix	skip
+Michael Jackson Rock With You Masters At Work Remix	skip
+Fu_Mou Green Night Parade	skip
+Oliver I Need You	skip
+YGz Ghetto Celeb	skip

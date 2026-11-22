@@ -21,6 +21,9 @@ enum AppPaths {
 
     /// Audio files, both automatically cached and explicitly downloaded.
     static let media = directory(root.appendingPathComponent("Media", isDirectory: true))
+    /// The pictures of downloaded music videos (their sound is in `media`).
+    static let videos = directory(root.appendingPathComponent("Videos", isDirectory: true))
+    static let videoIndex = root.appendingPathComponent("videos.json")
     static let artwork = directory(root.appendingPathComponent("Artwork", isDirectory: true))
     /// Copies of the data that a restore replaced.
     static let backups = directory(root.appendingPathComponent("Backups", isDirectory: true))
@@ -40,6 +43,22 @@ enum AppPaths {
     static let scrobbles = root.appendingPathComponent("scrobbles.json")
     /// The equaliser's active profile and saved profiles.
     static let eq = root.appendingPathComponent("eq.json")
+    /// Which music videos have an audio release, as found for playlists (video id → song).
+    static let audioVersions = root.appendingPathComponent("audio-versions.json")
+    /// Apple Music artist pictures and animated covers found so far (addresses only).
+    static let appleArtwork = root.appendingPathComponent("apple-artwork.json")
+
+    /// Where the app's settings (`AppSettings`) are kept. A run with METROLIST_HOME (every test)
+    /// keeps them in a separate domain: tests switch Autoplay, AutoMix and the rest off and on,
+    /// and when they ran from the packaged app they changed the listener's own settings
+    /// (Autoplay was found switched off on 2026-11-21).
+    nonisolated(unsafe) static let settings: UserDefaults = {
+        if let override = ProcessInfo.processInfo.environment["METROLIST_HOME"], !override.isEmpty,
+           let separate = UserDefaults(suiteName: "app.metrolist.mac.automix.tests") {
+            return separate
+        }
+        return .standard
+    }()
 
     private static func directory(_ url: URL) -> URL {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

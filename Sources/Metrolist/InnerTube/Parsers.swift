@@ -159,7 +159,9 @@ enum Parser {
                 thumbnail: thumb,
                 explicit: explicit,
                 isVideo: isVideoType(type),
-                setVideoId: renderer["playlistItemData"]["playlistSetVideoId"].string
+                videoType: type,
+                setVideoId: renderer["playlistItemData"]["playlistSetVideoId"].string,
+                unavailable: renderer["musicItemRendererDisplayPolicy"].string == "MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT" ? true : nil
             ))
         }
 
@@ -212,7 +214,8 @@ enum Parser {
                 album: album(in: subtitleGroups),
                 thumbnail: thumb,
                 explicit: explicit,
-                isVideo: isVideoType(musicVideoType(endpoint))
+                isVideo: isVideoType(musicVideoType(endpoint)),
+                videoType: musicVideoType(endpoint)
             ))
         }
 
@@ -259,6 +262,7 @@ enum Parser {
             thumbnail: thumbnail(renderer["thumbnail"]),
             explicit: isExplicit(renderer["badges"]),
             isVideo: isVideoType(musicVideoType(renderer["navigationEndpoint"])),
+            videoType: musicVideoType(renderer["navigationEndpoint"]),
             setVideoId: renderer["playlistSetVideoId"].string
         )
     }
@@ -370,7 +374,8 @@ enum Parser {
                 duration: subtitleGroups.map(groupText).compactMap(seconds).first,
                 thumbnail: thumb,
                 explicit: isExplicit(card["subtitleBadges"]),
-                isVideo: isVideoType(titleRun.musicVideoType)
+                isVideo: isVideoType(titleRun.musicVideoType),
+                videoType: titleRun.musicVideoType
             ))
         }
         guard let browseId = titleRun.browseId else { return nil }

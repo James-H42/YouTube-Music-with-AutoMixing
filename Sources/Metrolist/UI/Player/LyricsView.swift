@@ -1,6 +1,14 @@
 import SwiftUI
 
-/// Wraps subviews onto multiple lines, like text.
+/// Which word a subview of `FlowLayout` belongs to. Subviews of one word stay on one row when
+/// the word fits; a subview without one is a word of its own.
+struct FlowWord: LayoutValueKey {
+    static let defaultValue = -1
+}
+
+/// Wraps subviews onto multiple lines, like text: between words, and between the parts of a
+/// word (its syllables) only when the word is wider than a whole row, as a line of Japanese
+/// without spaces is. A single part wider than a row is given the row's width to wrap within.
 struct FlowLayout: Layout {
     var trailing = false
     var lineSpacing: CGFloat = 4
@@ -16,31 +24,53 @@ struct FlowLayout: Layout {
         var y = bounds.minY
         for row in arrange(subviews, width: bounds.width) {
             var x = trailing ? bounds.maxX - row.width : bounds.minX
-            for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
-                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
-                x += size.width
+            for item in row.items {
+                subviews[item.index].place(at: CGPoint(x: x, y: y + (row.height - item.size.height) / 2), proposal: item.proposal)
+                x += item.size.width
             }
             y += row.height + lineSpacing
         }
     }
 
+    private struct Item {
+        var index: Int
+        var size: CGSize
+        var proposal: ProposedViewSize
+    }
+
     private struct Row {
-        var indices: [Int] = []
+        var items: [Item] = []
         var width: CGFloat = 0
         var height: CGFloat = 0
     }
 
     private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var items = subviews.indices.map { Item(index: $0, size: subviews[$0].sizeThatFits(.unspecified), proposal: .unspecified) }
+        for position in items.indices where items[position].size.width > width {
+            let proposal = ProposedViewSize(width: width, height: nil)
+            items[position].proposal = proposal
+            items[position].size = subviews[items[position].index].sizeThatFits(proposal)
+        }
         var rows: [Row] = [Row()]
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            if rows[rows.count - 1].width + size.width > width, !rows[rows.count - 1].indices.isEmpty {
-                rows.append(Row())
+        func add(_ item: Item) {
+            rows[rows.count - 1].items.append(item)
+            rows[rows.count - 1].width += item.size.width
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, item.size.height)
+        }
+        var start = 0
+        while start < items.count {
+            // The run of parts that make up one word.
+            let word = subviews[items[start].index][FlowWord.self]
+            var end = start + 1
+            while word >= 0, end < items.count, subviews[items[end].index][FlowWord.self] == word { end += 1 }
+            let wordWidth = items[start ..< end].reduce(0) { $0 + $1.size.width }
+            if rows[rows.count - 1].width + wordWidth > width, !rows[rows.count - 1].items.isEmpty { rows.append(Row()) }
+            for item in items[start ..< end] {
+                // Only a word wider than a whole row is broken between its parts.
+                if rows[rows.count - 1].width + item.size.width > width, !rows[rows.count - 1].items.isEmpty { rows.append(Row()) }
+                add(item)
             }
-            rows[rows.count - 1].indices.append(index)
-            rows[rows.count - 1].width += size.width
-            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+            start = end
         }
         return rows
     }
@@ -56,6 +86,9 @@ private struct LyricLineView: View, Equatable {
     let fontSize: CGFloat
     let synced: Bool
     var showRomanized = true
+    /// Show the romanised reading in place of the original script (no word-by-word fill then,
+    /// since the timing belongs to the original words).
+    var hideOriginal = false
 
     private var font: Font {
         .system(size: line.isBackground ? fontSize * 0.72 : fontSize, weight: .bold, design: .rounded)
@@ -75,8 +108,16 @@ private struct LyricLineView: View, Equatable {
 
     var body: some View {
         VStack(alignment: line.isSecondary ? .trailing : .leading, spacing: fontSize * 0.14) {
-            lineText
-            if showRomanized, let romanized = line.romanized {
+            if showRomanized, hideOriginal, let romanized = line.romanized {
+                Text(romanized)
+                    .font(font)
+                    .foregroundStyle(.primary.opacity(isActive ? 1 : idleOpacity))
+                    .multilineTextAlignment(line.isSecondary ? .trailing : .leading)
+                    .lineSpacing(4)
+            } else {
+                lineText
+            }
+            if showRomanized, !hideOriginal, let romanized = line.romanized {
                 Text(romanized)
                     .font(.system(size: max(12, fontSize * 0.58), weight: .medium, design: .rounded))
                     .foregroundStyle(.primary.opacity(isActive ? 0.8 : idleOpacity * 0.85))
@@ -94,11 +135,12 @@ private struct LyricLineView: View, Equatable {
         Group {
             if isActive, let time, !line.words.isEmpty {
                 FlowLayout(trailing: line.isSecondary) {
-                    ForEach(Array(wordGroups.enumerated()), id: \.offset) { _, group in
-                        HStack(spacing: 0) {
-                            ForEach(Array(group.enumerated()), id: \.offset) { _, word in
-                                wordView(word, time: time)
-                            }
+                    // Each syllable is its own subview, tagged with its word, so a word too wide
+                    // for the column (Japanese often has no spaces) can still wrap.
+                    ForEach(Array(wordGroups.enumerated()), id: \.offset) { groupIndex, group in
+                        ForEach(Array(group.enumerated()), id: \.offset) { _, word in
+                            wordView(word, time: time)
+                                .layoutValue(key: FlowWord.self, value: groupIndex)
                         }
                     }
                 }
@@ -153,10 +195,11 @@ struct LyricsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(lyrics.lines) { line in
-                            Text(line.text.isEmpty ? " " : line.text)
+                            let replaced = model.settings.showRomanization && model.settings.hideOriginalLyrics && line.romanized != nil
+                            Text(replaced ? line.romanized! : line.text.isEmpty ? " " : line.text)
                                 .font(.system(size: fontSize * 0.8, weight: .semibold, design: .rounded))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            if model.settings.showRomanization, let romanized = line.romanized {
+                            if model.settings.showRomanization, !replaced, let romanized = line.romanized {
                                 Text(romanized)
                                     .font(.system(size: max(12, fontSize * 0.52), weight: .medium, design: .rounded))
                                     .foregroundStyle(.secondary)
@@ -214,7 +257,8 @@ private struct SyncedLyricsView: View {
                                 time: isActive ? time : nil,
                                 fontSize: fontSize,
                                 synced: true,
-                                showRomanized: model.settings.showRomanization
+                                showRomanized: model.settings.showRomanization,
+                                hideOriginal: model.settings.hideOriginalLyrics
                             )
                             .equatable()
                             .id(line.id)

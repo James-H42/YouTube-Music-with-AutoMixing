@@ -1,0 +1,210 @@
+# Style groups for AutoMix measurement. Used only by --mixaudit and --analysisaudit to report
+# results per group; the app never reads this file. Groups were assigned by artist and can be
+# corrected by hand. Format: videoId,group,title (title is for people only).
+#
+# jpop: J-pop, anime, J-rock, city pop, Japanese hip-hop
+m9SMT5ipbxk,jpop,YOASOBI - Idol
+DO_aopUeFnw,jpop,Mrs. GREEN APPLE - Lilac
+KMdTrqzEI0I,jpop,Gen Hoshino - Koi
+Qaevi7SPcLE,jpop,Gen Hoshino - Yuge
+5gRulYWK5AQ,jpop,Gen Hoshino - Friend Ship
+U6VVNKRDGDA,jpop,Gen Hoshino - Sakura no Mori
+0GEoiLdCkUM,jpop,Kenshi Yonezu - Melancholy Kitchen
+nmYDYalgb5w,jpop,Kenshi Yonezu - Sayonara Mata Itsuka
+L_pRTyuZ9fk,jpop,Kenshi Yonezu - Shinigami
+4tlUwgtgdZA,jpop,Sheena Ringo - Marunouchi Sadistic
+hbckxFs-obM,jpop,Sheena Ringo - A Double Suicide
+nRfrcaMJPnM,jpop,Sheena Ringo - Yokushitsu
+NeSXmmh0h9E,jpop,Sheena Ringo - Gips
+b1vwBKXTdqo,jpop,Hikaru Utada - Anata
+TF_HXWLTN8w,jpop,Hikaru Utada - Hatsukoi
+kDJVJLp2_p4,jpop,Hikaru Utada - PAPPAPARADISE
+GYeOVn0PhSk,jpop,Hikaru Utada - One Last Kiss
+ZS6p32gX_yk,jpop,Miki Matsubara - Mayonaka no Door
+AmLqwU5-3_o,jpop,SHISHAMO - Nakaniwano Shoujyotachi
+l21CsB5SJBg,jpop,sakanaction - Tsuki no Wan
+HbXaUmWaU5Q,jpop,sakanaction - Wasurerarenaino
+zArhnXbh3Yc,jpop,Creepy Nuts - Yofukashino Uta
+RCyzP0i8s9k,jpop,Creepy Nuts - doppelganger
+ZX3OhZPt3AI,jpop,ano - Destiny Lent Out
+lfXKsgyKDE0,jpop,ano - Smile Agenai
+wuLfDIac4bg,jpop,ano - From Hate To Love
+Xay0HJ4LsNc,jpop,Vaundy - Shiwaawase
+1DoF1ZXRmp8,jpop,RADWIMPS - Perfect baby
+B_4g3-BxH0M,jpop,ZUTOMAYO - Time Left
+KJjVgpCmiks,jpop,Reol - THE SIXTH SENSE
+V8KLgLrU280,jpop,Fujii Kaze - Nan-Nan
+ntRVm85--b4,jpop,AiNA THE END - On The Way
+0t0HtFYjcU8,jpop,imase - NIGHT DANCER
+0bsObTAGYqM,jpop,Kroi - SPIN
+hci81q8Q49Q,jpop,Yasuha - Fly-day Chinatown
+gprY11OD0cA,jpop,Hanae - Kamisama Hajimemashita
+UFFa0QoHWvE,jpop,Seatbelts - Tank!
+MBEgw_kfhzc,jpop,Yuko Matsutani - Ramu no Love Song
+gpOdTitsN3o,jpop,ATARASHII GAKKO! - OTONABLUE
+j1DnOm0DdQU,jpop,HALCALI - Otsukare Summer
+g6o-8YqIkFM,jpop,Kyary Pamyu Pamyu - Pang Pang Pang
+PfxogZd2wj4,jpop,Lamp - Hatachi No Koi
+ABrKq6EN2t4,jpop,Hitsujibungaku - Sugar
+sRWceRiaX3w,jpop,Ado - missing
+YWeQgf4lvDM,jpop,Yuki Chiba - Annyeonghaseyo
+# vocaloid: vocaloid, UTAU, Touhou and internet music
+pUtsGAb5_Ik,vocaloid,KIKUO - Good kid and a fox spirit
+RXXr3G00Uvc,vocaloid,KIKUO - Kimi wa dekinai ko
+g0EqOTPrzws,vocaloid,PinocchioP - Don't Believe in T
+pcPw56H9Bis,vocaloid,PinocchioP - Playing Immortal
+yM4HD6a-0w8,vocaloid,PinocchioP - Anonymous M
+BQsr9x5lma0,vocaloid,PinocchioP - Love Attribute
+HNSWCkkjExQ,vocaloid,MARETU - Umitagari
+RgHTSrw82GQ,vocaloid,MARETU - Coin locker Baby
+30RXzpjhXwA,vocaloid,MARETU - Magical Doctor
+TK2V_GGjyWI,vocaloid,Sasuke Haraguchi - Medicine
+L_5XcE4LrYs,vocaloid,Sasuke Haraguchi - HITO Mania
+N4N4-wScYyI,vocaloid,Neru - Lost One's Weeping
+0IdZLAOltls,vocaloid,inabakumori - Spot Late
+VfBswbj1824,vocaloid,inabakumori - Lagtrain
+MVNij6w8dJ4,vocaloid,rusino - Loop the Room
+6Z7W5SJOz08,vocaloid,bk - Enji
+nqTmucJwa8g,vocaloid,NAKISO - Retry Now
+L2TrIJsTKHk,vocaloid,Hiiragi Magnetite - Tetoris
+Yeg--gomuv8,vocaloid,nunununu - Dareka Nuitekure
+vwpQhka9TGE,vocaloid,nunununu - Momiagewo Shakaagewo
+Skz0DR8DA5Y,vocaloid,Aiobahn +81 - Tententengokujigokugoku (Miku)
+hv9Sk4ZeSAM,vocaloid,NEEDY GIRL OVERDOSE - INTERNET YAMERO
+ssk177MxEvs,vocaloid,OMGkawaiiAngel - Cubism
+utdQbAdiP70,vocaloid,IOSYS - Marisa Stole Precious Thing
+jcKUEQMCqYc,vocaloid,Gakuon - mosi mosi?
+WVbRaqw0sUc,vocaloid,Gakuon - otukare
+# hiphop: hip-hop and R&B
+GTmbyuTKT_c,hiphop,Kanye West - Good Life
+2ulp_AMut14,hiphop,Kanye West - Stronger
+G8u3P7Xqlvo,hiphop,Kanye West - God Is
+Lu-edhQJBWI,hiphop,JAY-Z & Kanye West - Ni**as In Paris
+JiNxvNtlBPM,hiphop,Don Toliver - Body
+4xtwjLqdaj0,hiphop,Playboi Carti - EVIL J0RDAN
+2VPAdf9dkmQ,hiphop,Kanye West - CARNIVAL
+-lyBxb7nagk,hiphop,DaBaby - POP DAT THANG
+Osvg7Ofd5d0,hiphop,Sheck Wes - Mo Bamba
+H4RELGc9su8,hiphop,Kendrick Lamar - HUMBLE.
+67vr-3kpX3Q,hiphop,Kendrick Lamar - Alright
+g0NVaX8DRN4,hiphop,Kendrick Lamar - King Kunta
+FrsOnNxIrg8,hiphop,Drake - God's Plan
+NQbkGDoD7B0,hiphop,Travis Scott - SICKO MODE
+9mahKFNuHqM,hiphop,Travis Scott - goosebumps
+t-E2gm0a_N0,hiphop,Tyler The Creator - EARFQUAKE
+EZE62LpaqHg,hiphop,Tyler The Creator - See You Again
+CSD2J8yaMmM,hiphop,Outkast - Ms. Jackson
+Qeem6ZVr8Ic,hiphop,Dr. Dre - Still D.R.E.
+H9NuWEeODew,hiphop,The Notorious B.I.G. - Hypnotize
+xidb8xmuiWI,hiphop,Frank Ocean - Chanel
+k5PO17AC3Kg,hiphop,Lil Uzi Vert - XO Tour Llif3
+ZjODWsHFo5Y,hiphop,Fetty Wap - Trap Queen
+rNB5eIiIsUc,hiphop,MF DOOM - Hoe Cakes
+0_M2JX-Olv8,hiphop,Nujabes - Feather
+_3WY5UN5tMY,hiphop,Kanye West - Heartless
+k8JflBNovLE,hiphop,Kanye West - POWER
+mKZd_B42_2U,hiphop,Lupe Fiasco - Kick Push
+iM6iO8TD3tM,hiphop,Timbaland - The Way I Are
+V4HdD2Fu_64,hiphop,slayr - keep me going
+# pop
+tVdr_JWmnsA,pop,Britney Spears - Toxic
+nujn6wbr-e8,pop,Harry Styles - As It Was
+JucvYrdSIcM,pop,Bruno Mars - That's What I Like
+BF2_ipR1OI0,pop,Bruno Mars - Risk It All
+YSWrmX4_qFA,pop,Maroon 5 - Animals
+7EJbFg_LxjY,pop,Justin Timberlake - Rock Your Body
+_cUM4SlY2_o,pop,Nicki Minaj - Starships
+y32ejtuxSjM,pop,Michael Jackson - P.Y.T.
+wAoq__SQpwk,pop,Michael Jackson - Chicago
+cGO6ZwrppDQ,pop,JVKE - this is what falling in love feels like
+XJ22N9iYkEE,pop,Dadi Freyr - Beautiful Day
+HS15BxSVjJs,pop,Dadi Freyr - Clear My Head
+yw96ciQOx0Y,pop,Dadi Freyr - Somebody Else Now
+opnZlnd3d7U,pop,The Black Eyed Peas - My Humps
+VoGilr7ediw,pop,AURORA - Cure For Me
+3_g2un5M350,pop,The Weeknd - Starboy
+hX9S94XsySk,pop,The Weeknd - Hong Kong
+WTgNu7XHrrU,pop,Cynthia Erivo - Defying Gravity
+dBLzh47wdrU,pop,Jamie Paige - BIRDBRAIN
+TxgjsTE7A4o,pop,Alfie Templeman - Things I Thought Were Mine
+BI9HQCzpDgQ,pop,Malcolm Todd - Earrings
+# rock: rock, alternative, and band-played funk and soul
+qU9mHegkTc4,rock,Arctic Monkeys - 505
+BSTsnWoslP4,rock,Queen - Bohemian Rhapsody
+lSDfCdycdvk,rock,The Cranberries - Zombie
+QrR-7QFquok,rock,Billy Joel - Movin' Out
+55q6jrfBDdk,rock,Billy Joel - We Didn't Start the Fire
+wbxTlxuECJA,rock,The Beatles - Eleanor Rigby
+cuMuMnCRfqk,rock,Tame Impala - Dracula
+MX7FSAnRPug,rock,Tame Impala - Loser
+tEXYfT_G0W0,rock,Tame Impala - New Person Same Old Mistakes
+p00v9ZFhWJM,rock,Gorillaz - On Melancholy Hill
+NxxjLD2pmlk,rock,Gorillaz - Feel Good Inc.
+_aKgAniBxY8,rock,The Long Faces - Jane!
+mzhbRUniU4U,rock,Oliver Tree - Life Goes On
+GieQq3eWSnE,rock,Jamiroquai - Virtual Insanity
+nHggUe88bxc,rock,Curtis Mayfield - Move On Up
+vTWZ2e0sLaQ,rock,Curtis Mayfield - Superfly
+ftdZ363R9kQ,rock,Stevie Wonder - Superstition
+c7IYSAUj78g,rock,Stevie Wonder - I Wish
+# electronic
+fa5IWHDbftI,electronic,Daft Punk - One More Time
+WYhv-hR6Q2U,electronic,Daft Punk - One More Time (Radio Edit)
+l4L78W66kCI,electronic,Daft Punk - Robot Rock
+JhulBGMA7G4,electronic,Daft Punk - Harder Better Faster Stronger
+ARfJ55bUAw0,electronic,Daft Punk - Around the World
+32J7bZHva9M,electronic,Daft Punk - Da Funk
+ZFZM6jDTWd4,electronic,Daft Punk - Giorgio by Moroder
+OWiVJMgms9E,electronic,Daft Punk - Voyager
+Rgrt_8mXrK8,electronic,Daft Punk - Get Lucky
+khnokW3Mw24,electronic,Daft Punk - Instant Crush
+dS-BTaysDGU,electronic,Lemon Jelly - Elements
+gFeOa2vBZeI,electronic,Lemon Jelly - Nice Weather for Ducks
+m5QIfyyTnz8,electronic,Lemon Jelly - Return To Patagonia
+mllzzUjMezU,electronic,Bag Raiders - Shooting Stars
+ekk0NSXCuqI,electronic,Jungle - Back On 74
+hJDBRYCDKo4,electronic,Elderbrook - Inner Light
+lvEMma-svec,electronic,Cafune - Tek It (Sped Up)
+UwTt2Ox_0AE,electronic,Caramella Girls - Caramelldansen
+7mNfcx6nzU0,electronic,Kanii - I Know
+qTMaK4pxF68,electronic,Joost - Enfant Terrible
+# other: other non-Western music (K-pop, Indian, Caribbean). Fewer than 10 are cached.
+g2d1QmEz8wo,other,TWICE - TAKEDOWN
+sjtyqmA-pH4,other,YENA - Catch Catch
+TuzfXgUpboA,other,HUNTR/X - Golden
+y7CrvsCIjyo,other,Saja Boys - Soda Pop
+JCf7lKL1UQ4,other,Hanumankind - Big Dawgs
+9iUyi2hjz8I,other,Frozy & Tomo - Islands (kompa pasion)
+# docs/test.csv songs (owner test set)
+iCEToNLagMc,jpop,何月の霧 - Nangatsu no Kiri si_ku.k (test.csv)
+UlKjIWvPNWY,jpop,シーフード - Seafood si_ku.k (test.csv)
+ATpVIK55l1c,jpop,Boyz & Girlz Hanae Jyukkai Quiz (test.csv)
+Tay5wEGfxuI,jpop,Suicide of the 21st century 0.8byou to syogeki. (test.csv)
+wXJYjootC-4,jpop,『この社会オワってんな』 - What a joke of a world CARAMEL CANDiD (test.csv)
+GzbmmFUU2Gg,jpop,傷口にお砂糖 - Sugar on the wound CARAMEL CANDiD (test.csv)
+N78f_FGl1ak,vocaloid,行列のできるえーりん診療所 - Gyoretsu no dekiru Eirin Shinryojo IOSYS (test.csv)
+0l0UpWyM8rw,vocaloid,ヒビダラケの眼 - Hibidarake No Me KikuoHana (Kikuo to Hanatan) (test.csv)
+S87Fk_N8H3w,vocaloid,ぽんこつ人形の唄 - Ponkotsuningyou No Uta KikuoHana (Kikuo to Hanatan) (test.csv)
+waEH4zw_R2k,vocaloid,朝さん夜さん - Asasan Yorusan KikuoHana (Kikuo to Hanatan) First Act (test.csv)
+Vg5dO2Tnw5s,vocaloid,セカセカ劇場 - Sekaseka Gekijou KikuoHana (Kikuo to Hanatan) First Act (test.csv)
+Zge0hNM_IVM,vocaloid,光よ - Hikariyo KikuoHana (Kikuo to Hanatan) First Act (test.csv)
+euFtv3jkFwA,vocaloid,デザート・シアター - Desert Theater KikuoHana (Kikuo to Hanatan) First Act (test.csv)
+-XQZLQV_o3A,vocaloid,のぼれ!すすめ!高い塔 - Nobore! Susume! Takai Tou KikuoHana (Kikuo to Hanatan) F (test.csv)
+-ZqXvSQeBFw,vocaloid,ヒトガワリ - Hitogawari KikuoHana (Kikuo to Hanatan) (test.csv)
+e7RXSVAhlng,vocaloid,不幸屋の娘 - Fukouya No Musume KikuoHana (Kikuo to Hanatan) (test.csv)
+4smPar0ajts,vocaloid,カラカラカラのカラ (STuPiD DaNCe ReMiX) - Emptiness Emptiness Emptiness of Empt (test.csv)
+X5BrnRxKO-s,vocaloid,推推推推推推推推金金金金金金金金 - OSHIOSHIOSHIOSHI / MONEYMONEYMONEYMONEY KIKUO; Mea  (test.csv)
+ymqsejDbhkw,vocaloid,天国へ行こう - tengoku e ikou (feat. Hatsune Miku) Hatsune Miku; KIKUO Kikuo (test.csv)
+uax19yUJ7v8,vocaloid,ごめんね ごめんね - Gomennne Gomennne (feat. Hatsune Miku) Hatsune Miku; KIKUO (test.csv)
+LHYiwXI7YEs,vocaloid,しかばねの踊り - Dance of corpse (feat. Hatsune Miku) KIKUO Kikuo Miku 3 (test.csv)
+OrCaJQlZKKU,vocaloid,Blue Cave KIKUO Ikimono no Tamashii no Yukue (test.csv)
+zSfG_LEBwZs,vocaloid,ららら螺旋のなか - La La La Rasen no Naka (feat. Hatsune Miku) Hatsune Miku; K (test.csv)
+gfozEKCC1Og,vocaloid,カラカラカラのカラ - Kara Kara Kara no Kara (feat. Hatsune Miku) Hatsune Miku;  (test.csv)
+5ujYkp-axv8,vocaloid,あなぐらぐらし - Hole dwelling Hatsune Miku; KIKUO Kikuo Miku 6 (test.csv)
+PhTVMDFDRx4,vocaloid,きらいきらいきらいって - Hate you Hate you Hate you But... KIKUO Kikuo Miku 7 (test.csv)
+3Sn1I9HLPlo,vocaloid,深い森のなかで - In a deep dark forest KIKUO Kikuo Miku 7 (test.csv)
+zScOG2OB1ps,vocaloid,ソワカの声 - Voices of Svaahaa (feat. Hatsune Miku) KIKUO Kikuo Miku 7 (test.csv)
+SHEBvgANYzw,vocaloid,カエルのおどり - Dance of the Frogs KIKUO Kikuo Miku 7 (test.csv)
+x4HNLsqpBHg,vocaloid,My Time OMORI ver. (Kikuo cover) (feat. Hatsune Miku) KIKUO Kikuo Miku (test.csv)
+N20UaCpooFI,vocaloid,見つかんない見つかんない - Missing Missing KIKUO Kikuo Miku 7 (test.csv)
+ujTrEhZUNDo,vocaloid,みずみずユッユ - Water Water Yu Yu KIKUO Kikuo Miku 7 (test.csv)

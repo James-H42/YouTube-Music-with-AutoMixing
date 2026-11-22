@@ -19,6 +19,21 @@ samples.json
 .source-backup-*
 COMMIT_MESSAGE.txt
 CLAUDE.md
+docs/PROJECT_GUIDE.md
+docs/test.csv
 
 # Must Include
 !README.md
+!docs/PROJECT_GUIDE.md
+!docs/AUTOMIX_REFERENCE_MIXES.md
+!docs/AUTOMIX_BRANCH_MERGE_GUIDE.md
+!docs/paper/FACTS.md
+
+# The stem model is too large for git (over 100 MB a file): make it with
+# Tools/ml/convert_demucs.py Models. The app works without it; stems are then off.
+Models/HTDemucs*.mlpackage/
+
+# Python tooling for the AutoMix beat model (environment, data and checkpoints stay local)
+Tools/ml/.venv*/
+Tools/ml/data/
+Tools/ml/__pycache__/

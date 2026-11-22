@@ -57,6 +57,76 @@ enum Snapshot {
             return
         }
 
+        if CommandLine.arguments.contains("--sound") {
+            // `--snapshot dir --sound`: the Sound settings (with bit-perfect output on and off)
+            // and the AutoEQ headphone search.
+            for on in [false, true] {
+                model.settings.bitPerfect = on
+                await capture("settings-sound\(on ? "-bitperfect" : "")", size: CGSize(width: 520, height: 980), settle: 2) { SoundSettings() }
+            }
+            model.settings.bitPerfect = false
+            await capture("autoeq-search", size: CGSize(width: 520, height: 480), settle: 5) { HeadphoneSearchSheet { _ in } }
+            return
+        }
+        if CommandLine.arguments.contains("--concerts") {
+            // `--snapshot dir --concerts`: Concerts from London and Manchester on the check's
+            // sample concerts, a concert's page, the place picker, the key sheet, the settings
+            // and (live, from MusicBrainz) YOASOBI's concerts on an artist page, from Tokyo.
+            let store = ConcertStore.shared
+            let event = (try? JSONSerialization.jsonObject(with: Data(ConcertTest.fixture.utf8))) as? [String: Any] ?? [:]
+            var sample = ConcertTest.sample
+            if let detailed = Ticketmaster.concert(from: event, artists: ["K8vZ917G1x0": "Wolf Alice"]) { sample.append(detailed) }
+            for (name, place) in [("london", ConcertTest.london), ("manchester", ConcertTest.manchesterCity)] {
+                store.location = place
+                store.preview(sample)
+                await capture("concerts-\(name)", size: main, settle: 4) { NavigationStack { ConcertsView() } }
+            }
+            await capture("concert-detail", size: CGSize(width: 980, height: 1100), settle: 2) { NavigationStack { ConcertDetailView(id: "tm:G5vYZ123") } }
+            // A listing without a picture (as MusicBrainz's are) gets the artist's picture.
+            store.location = ConcertTest.london
+            let bare = Concert(id: "mb:snapshot", name: "Halfblood Tour: London", artists: ["slayr"], performers: [ConcertPerformer(name: "slayr")],
+                               venue: ConcertVenue(name: "Electric Ballroom", city: "London", countryCode: "GB", countryName: "United Kingdom", latitude: 51.5397, longitude: -0.1430),
+                               localDate: "2027-12-08", localTime: "19:00:00", source: "musicbrainz")
+            store.preview([bare])
+            await store.findPictures(for: [bare], apple: false)
+            await capture("concerts-picture", size: CGSize(width: 900, height: 520), settle: 4) { NavigationStack { ConcertsView() } }
+            store.location = nil
+            // Wide, to check the prompt stays in the middle of the page.
+            await capture("concerts-no-location", size: CGSize(width: 1400, height: 600), settle: 1) { NavigationStack { ConcertsView() } }
+            await capture("concerts-picker", size: CGSize(width: 360, height: 420), settle: 1) { LocationPicker { _ in } }
+            await capture("concerts-key", size: CGSize(width: 440, height: 440), settle: 1) { TicketmasterKeySheet() }
+            await capture("settings-concerts", size: CGSize(width: 520, height: 360), settle: 1) { Form { ConcertSettings() }.formStyle(.grouped) }
+            store.location = ConcertTest.tokyo
+            await capture("artist-concerts", size: CGSize(width: 900, height: 520), settle: 25) {
+                ScrollView { ArtistConcertsSection(artist: ConcertArtist(name: "YOASOBI", channelId: nil)).padding(.vertical, 20) }
+            }
+            store.location = nil
+            return
+        }
+        if CommandLine.arguments.contains("--storage") {
+            // `--snapshot dir --storage`: the Storage settings, for the test home's files.
+            await capture("settings-storage", size: CGSize(width: 520, height: 640), settle: 1) { StorageSettings() }
+            let split = model.media.storage
+            print("songs downloaded \(split.downloadedSongs.count) (\(split.downloadedSongs.bytes) B), cached \(split.cachedSongs.count) (\(split.cachedSongs.bytes) B)")
+            print("music videos: sound downloaded \(split.downloadedVideoSound.count) (\(split.downloadedVideoSound.bytes) B), cached \(split.cachedVideoSound.count) (\(split.cachedVideoSound.bytes) B), pictures \(VideoDownloads.shared.records.count) (\(VideoDownloads.shared.bytes) B)")
+            if CommandLine.arguments.contains("--clearvideos") {
+                model.media.clearCache(musicVideos: true)
+                let after = model.media.storage
+                print("after clearing the music video cache: songs cached \(after.cachedSongs.count), music video sound cached \(after.cachedVideoSound.count), downloads \(after.downloadedSongs.count)+\(after.downloadedVideoSound.count)")
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--videocontrols") {
+            // `--snapshot dir --videocontrols`: the floating controls of the video player at
+            // several widths, on black, to check that the transport buttons are centred.
+            for width in [760.0, 600, 520] {
+                await capture("video-controls-\(Int(width))", size: CGSize(width: width, height: 130), settle: 1) {
+                    VideoControls(showQueue: .constant(false), isFullScreen: false, toggleFullScreen: {})
+                        .background(.black)
+                }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--diagnose") {
             await diagnose(model: model, size: main)
             return
@@ -82,6 +152,40 @@ enum Snapshot {
             DeviceConnect.guests.shutdown()
             return
         }
+        if CommandLine.arguments.contains("--nov19screens") {
+            // `--snapshot dir --nov19screens`: screens changed on 2026-11-19 (Apple Music artwork off).
+            model.settings.appleArtistImages = false
+            model.settings.animatedArtistArtwork = false
+            model.settings.animatedAlbumCovers = false
+            model.settings.preferAudioVersions = true
+            let artists = (try? await YTMusic.search(ProcessInfo.processInfo.environment["SNAP_ARTIST"] ?? "Kanye West", filter: .artists).sections.flatMap(\.items)) ?? []
+            if let artist = artists.compactMap({ if case .artist(let found) = $0 { found } else { nil } }).first {
+                if let page = try? await YTMusic.artist(artist.id) { print("banner:", page.artist.thumbnail ?? "none") }
+                await capture("artist-page", size: main, settle: 6) { NavigationStack { ArtistView(browseId: artist.id) } }
+            }
+            let albums = (try? await YTMusic.search("Currents Tame Impala", filter: .albums).sections.flatMap(\.items)) ?? []
+            if let album = albums.compactMap({ if case .album(let found) = $0 { found } else { nil } }).first {
+                await capture("album-page", size: main, settle: 6) { NavigationStack { AlbumView(browseId: album.id) } }
+            }
+            await capture("playlist-videos-swapped", size: main, settle: 8) { NavigationStack { PlaylistView(playlistId: "PLOhV0FrFphUdkuWPE2bzJEsGxXMRKVkoM") } }
+            let library = model.library
+            if library.playlists.isEmpty {
+                _ = library.createPlaylist(name: "Liked Songs - Spotify")
+                _ = library.createPlaylist(name: "Road trip")
+                library.mergeRemote(liked: nil, albums: nil, artists: nil, playlists: [PlaylistItem(id: "PLdemo", title: "From YouTube Music")])
+                library.moveSidebarPlaylists(from: IndexSet(integer: 2), to: 0)
+            }
+            await capture("sidebar-arranged", size: CGSize(width: 240, height: 560), settle: 1) { SidebarView() }
+            struct FilterDemo: View {
+                @State var text = "touch"
+                var body: some View { FilterField(text: $text, shown: 4, total: 312).padding(20) }
+            }
+            await capture("filter-count", size: CGSize(width: 520, height: 70), settle: 1) { FilterDemo() }
+            await capture("settings-general", size: CGSize(width: 580, height: 520), settle: 1) { GeneralSettings() }
+            await capture("settings-integrations-discord", size: CGSize(width: 580, height: 700), settle: 1) { IntegrationsSettings() }
+            return
+        }
+
         if CommandLine.arguments.contains("--newscreens") {
             // `--snapshot dir --newscreens [songId]`: every screen added by the v14 integration.
             let settingsSize = CGSize(width: 580, height: 520)

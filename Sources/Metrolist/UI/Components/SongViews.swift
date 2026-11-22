@@ -191,7 +191,9 @@ struct SongRow: View {
         .padding(.vertical, 5)
         .padding(.horizontal, 10)
         .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.6)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 8))
-        .opacity(unavailableOffline ? 0.4 : 1)
+        // Greyed out as in Metrolist 14.0.1: unavailable on YouTube Music, or offline and not saved.
+        .opacity(unavailableOffline || song.unavailable == true ? 0.4 : 1)
+        .help(song.unavailable == true ? "This song isn't available on YouTube Music" : "")
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .onTapGesture(count: 2, perform: onPlay)
@@ -237,6 +239,10 @@ struct SongList: View {
     var showArtwork = true
     var showAlbum = true
     var localPlaylistId: String?
+    /// Whether a music video clicked here plays as a video (the Music Videos downloads).
+    /// In playlists, albums and the library it is swapped for its audio release like the rest,
+    /// with "Prefer audio versions" on.
+    var playsVideos = false
 
     @Environment(AppModel.self) private var model
 
@@ -250,7 +256,7 @@ struct SongList: View {
                     showAlbum: showAlbum,
                     localPlaylistId: localPlaylistId
                 ) {
-                    model.player.play(songs, startAt: index)
+                    model.player.play(songs, startAt: index, chosen: playsVideos)
                 }
             }
         }

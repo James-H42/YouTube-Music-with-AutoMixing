@@ -1,0 +1,18 @@
+{
+  "checkpoint": "small0",
+  "beatThisCommit": "b95c8ab",
+  "precision": "float32",
+  "sampleRate": 22050,
+  "nFFT": 1024,
+  "hop": 441,
+  "fps": 50,
+  "mels": 128,
+  "chunk": 1500,
+  "border": 6,
+  "center": "reflect",
+  "normalized": "frame_length",
+  "power": 1,
+  "logMultiplier": 1000,
+  "window": "BeatThis-window.f32",
+  "filterbank": "BeatThis-mel.f32 (513 x 128, row-major)"
+}

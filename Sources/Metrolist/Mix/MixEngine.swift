@@ -178,16 +178,198 @@ final class MixEngine: @unchecked Sendable {
             }
             activeDeck.enqueueNext(nil)
             pending = (upcoming, plan)
+            pendingNormalize = normalize
             waitingLogged = false
             MixLog.write(String(format: "cued %@: out at %.2f s, in at %.2f s (now at %.2f s)", plan.summary, plan.outStart, plan.inPoint, activeDeck.currentTime))
             if let loop = plan.loop { activeDeck.setLoop(start: loop.start, length: loop.length) }
             let incoming = decks[1 - active]
             incoming.stop()
+            incoming.setStemMix(nil)
             incoming.prepare(stretch: true)
             incoming.load(upcoming, startAt: plan.inPoint, autoplay: false, normalize: normalize)
             // Faders, EQ and tempo are set when the transition starts: loading resets them.
             startTimer()
+            if Self.usesStems(plan) {
+                prepareStems(plan: plan, from: active, to: 1 - active, upcoming: upcoming, normalize: normalize)
+            }
         }
+    }
+
+    /// Counts stem requests; only the latest one's stems are applied (a plan moved to a later
+    /// mix point keeps its id but needs another stretch).
+    private var stemJob = 0
+    /// Which deck had its stems in place before the plan's overlap began. A side without them
+    /// swaps its bass on the EQ instead (`withoutStems`).
+    private var stemsInPlace: (plan: UUID, outgoing: Bool, incoming: Bool)?
+    /// Loudness normalisation of the cued track, for cueing it again with its stems.
+    private var pendingNormalize = true
+
+    /// The plan as it plays on the sides whose stems are not in place: their bass swap, which
+    /// the stems would have made, is made with the EQ's low band, as in a plan without stems.
+    static func withoutStems(_ plan: MixPlan, outgoing: Bool, incoming: Bool) -> MixPlan {
+        var plan = plan
+        if !outgoing, let lanes = plan.outgoingStems, !lanes.bass.isConstant { plan.outgoing.bass = lanes.bass }
+        if !incoming, let lanes = plan.incomingStems, !lanes.bass.isConstant { plan.incoming.bass = lanes.bass }
+        return plan
+    }
+
+    /// Whether a plan has stem moves for the engine to make.
+    static func usesStems(_ plan: MixPlan) -> Bool {
+        plan.sync && plan.loop == nil && ((plan.outgoingStems.map { !$0.isNeutral } ?? false) || (plan.incomingStems.map { !$0.isNeutral } ?? false))
+    }
+
+    /// The stretches of the two songs an overlap covers, half a second wider on each side.
+    static func stemStretches(_ plan: MixPlan) -> (outgoing: (start: Double, end: Double), incoming: (start: Double, end: Double)) {
+        let spanA = Double(plan.beats) * plan.periodA
+        let spanB = Double(plan.beats) * plan.periodB
+        return ((plan.outStart - 0.5, plan.outStart + spanA + 0.5), (max(0, plan.inPoint - 0.5), plan.inPoint + spanB + 0.5))
+    }
+
+    /// Separates a transition's stems as soon as its plan is known, into the separator's cache,
+    /// so they are in place when it is cued, even when the listener jumps to just before it
+    /// (the preview starts 5 s ahead, and separating takes 3 to 5 s).
+    func separateStemsAhead(_ plan: MixPlan, current: URL?, next: URL?) {
+        guard Self.usesStems(plan), StemSeparator.isInstalled else { return }
+        let stretches = Self.stemStretches(plan)
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let separator = StemSeparator.shared else { return }
+            if let current, plan.outgoingStems.map({ !$0.isNeutral }) == true {
+                _ = separator.separate(file: current, from: stretches.outgoing.start, to: stretches.outgoing.end)
+            }
+            if let next, plan.incomingStems.map({ !$0.isNeutral }) == true, FileManager.default.fileExists(atPath: next.path) {
+                _ = separator.separate(file: next, from: stretches.incoming.start, to: stretches.incoming.end)
+            }
+        }
+    }
+
+    /// When the outgoing vocals step aside, decided on the separated vocal stems (singing as
+    /// progress through the overlap, 0 … 1). If both songs sing at once for more than a second,
+    /// the outgoing vocals fade out over half a beat, on the last beat before the incoming
+    /// vocals start, and stay out. Before 2026-11-21 they faded over the first quarter of every
+    /// such overlap, so both vocals were heard together for up to a quarter of it, and the
+    /// threshold was Mosaikbox's two seconds.
+    static func vocalHandOver(singingA: [ClosedRange<Double>], singingB: [ClosedRange<Double>], beats: Int, span: Double)
+        -> (curve: MixCurve?, together: Double) {
+        var together = 0.0
+        var firstClash: Double?
+        for x in singingA {
+            for y in singingB {
+                let from = max(x.lowerBound, y.lowerBound, 0)
+                let to = min(x.upperBound, y.upperBound, 1)
+                guard to > from else { continue }
+                together += to - from
+                firstClash = min(firstClash ?? from, from)
+            }
+        }
+        guard together * span > 1, let firstClash else { return (nil, together * span) }
+        let beat = 1 / Double(max(1, beats))
+        let ramp = beat / 2
+        let cutEnd = max(ramp, (firstClash / beat).rounded(.down) * beat)
+        let cutStart = cutEnd - ramp
+        let points: [(Double, Double)] = cutStart > 0.0001 ? [(0, 1), (cutStart, 1), (cutEnd, 0), (1, 0)] : [(0, 1), (cutEnd, 0), (1, 0)]
+        return (MixCurve(points), together * span)
+    }
+
+    /// A deck's stem gains, made safe for audio already read: a deck reads about 3 s ahead of
+    /// what is heard, and stems change only what it reads from now on. Whatever the lanes do
+    /// before `readFrom` is moved to just after it, faded in over one beat, so nothing jumps.
+    static func stemGains(_ lanes: StemLanes, start: Double, span: Double, beats: Int, readFrom: Double) -> @Sendable (Double) -> [Float] {
+        let late = (readFrom - start) / span
+        let fade = 1 / Double(max(1, beats))
+        return { time in
+            let progress = (time - start) / span
+            let gains = lanes.gains(at: progress)
+            guard late > 0, progress < late + fade else { return gains }
+            let amount = Float(max(0, (progress - late) / fade))
+            return gains.map { 1 + ($0 - 1) * amount }
+        }
+    }
+
+    /// Separates the two stretches the overlap covers (or takes them from the cache) and hands
+    /// each deck its stems with the plan's gains. The incoming deck is cued again from its entry
+    /// point so its first buffers are read with the stems in place. Stems that arrive after the
+    /// overlap has begun still take the outgoing vocals out from where they can (faded in, so
+    /// nothing jumps); the bass swap is then made with the EQ (`watchForMixPoint`). Without the
+    /// model, or if separating fails, the songs play whole.
+    private func prepareStems(plan: MixPlan, from outgoingIndex: Int, to incomingIndex: Int, upcoming: OpenedMedia, normalize: Bool) {
+        guard StemSeparator.isInstalled else { return }
+        stemJob += 1
+        let job = stemJob
+        stemsInPlace = nil
+        let outgoingDeck = decks[outgoingIndex]
+        let incomingDeck = decks[incomingIndex]
+        let current = outgoingDeck.currentFile
+        let next = upcoming.fileURL.map { (videoId: upcoming.videoId, url: $0) }
+        let stretches = Self.stemStretches(plan)
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            guard let separator = StemSeparator.shared else { return }
+            let started = Date()
+            let cached = (current.map { StemSeparator.isCached(file: $0.url, from: stretches.outgoing.start, to: stretches.outgoing.end) } ?? true)
+                && (next.map { StemSeparator.isCached(file: $0.url, from: stretches.incoming.start, to: stretches.incoming.end) } ?? true)
+            let spanA = Double(plan.beats) * plan.periodA
+            let spanB = Double(plan.beats) * plan.periodB
+            let outgoingStems = plan.outgoingStems.flatMap { lanes -> StemSeparator.Stems? in
+                guard !lanes.isNeutral, let current else { return nil }
+                return separator.separate(file: current.url, from: stretches.outgoing.start, to: stretches.outgoing.end)
+            }
+            let incomingStems = plan.incomingStems.flatMap { lanes -> StemSeparator.Stems? in
+                guard !lanes.isNeutral, let next, FileManager.default.fileExists(atPath: next.url.path) else { return nil }
+                return separator.separate(file: next.url, from: stretches.incoming.start, to: stretches.incoming.end)
+            }
+            // Whether both really sing at once, measured on the vocal stems rather than guessed.
+            // Not in a lyric match, where the shared words are the point.
+            var vocalNote = ""
+            var outgoingLanes = plan.outgoingStems
+            if let a = outgoingStems, let b = incomingStems, plan.reason != .lyrics {
+                let singingA = StemSeparator.singing(in: a).map { (($0.lowerBound - plan.outStart) / spanA) ... (($0.upperBound - plan.outStart) / spanA) }
+                let singingB = StemSeparator.singing(in: b).map { (($0.lowerBound - plan.inPoint) / spanB) ... (($0.upperBound - plan.inPoint) / spanB) }
+                let decision = Self.vocalHandOver(singingA: singingA, singingB: singingB, beats: plan.beats, span: spanA)
+                outgoingLanes?.vocals = decision.curve ?? .constant(1)
+                let cut = decision.curve.flatMap { curve in curve.points.first { $0.y < 0.001 }?.x }
+                vocalNote = String(format: ", both sing for %.1f s so the outgoing vocals %@", decision.together,
+                                   cut.map { String(format: "step aside by %.0f %% of the overlap", $0 * 100) } ?? "stay")
+            }
+            let seconds = Date().timeIntervalSince(started)
+            queue.async { [self] in
+                guard stemJob == job else { return }
+                let stillPending = pending?.plan.id == plan.id
+                let running = transition?.plan.id == plan.id
+                guard stillPending || running else { return }
+                var outgoingSet = false
+                var incomingSet = false
+                var lateNote = ""
+                if let stems = outgoingStems, var lanes = outgoingLanes, let current {
+                    // Once the overlap has begun only the vocals are still changed: the bass
+                    // already swaps on the EQ.
+                    if running { lanes = StemLanes(vocals: lanes.vocals) }
+                    if !lanes.isNeutral {
+                        let readFrom = outgoingDeck.readPosition
+                        if readFrom > plan.outStart {
+                            lateNote = String(format: "; the playing song had been read %.1f s into the overlap, so its stem moves start from there", readFrom - plan.outStart)
+                        }
+                        let gains = Self.stemGains(lanes, start: plan.outStart, span: spanA, beats: plan.beats, readFrom: readFrom)
+                        outgoingDeck.setStemMix(AudioEngine.StemMix(videoId: current.videoId, stems: stems, gains: gains))
+                        outgoingSet = true
+                    }
+                }
+                if let stems = incomingStems, let lanes = plan.incomingStems, let next, stillPending {
+                    let gains = Self.stemGains(lanes, start: plan.inPoint, span: spanB, beats: plan.beats, readFrom: -.infinity)
+                    incomingDeck.setStemMix(AudioEngine.StemMix(videoId: next.videoId, stems: stems, gains: gains))
+                    incomingDeck.load(upcoming, startAt: plan.inPoint, autoplay: false, normalize: normalize)
+                    incomingSet = true
+                }
+                if stillPending { stemsInPlace = (plan.id, outgoingSet, incomingSet) }
+                MixLog.write(String(format: "stems ready in %.1f s%@: outgoing %@, incoming %@%@%@%@", seconds, cached ? " (separated ahead)" : "",
+                                    outgoingStems == nil ? "whole" : "separated", incomingStems == nil ? "whole" : "separated", vocalNote, lateNote,
+                                    stillPending ? "" : " (late: the overlap had begun, so only the outgoing vocals change, from where they could)"))
+            }
+        }
+    }
+
+    private func clearStems() {
+        stemJob += 1
+        stemsInPlace = nil
+        decks.forEach { $0.setStemMix(nil) }
     }
 
     // MARK: - Deck events (mix queue)
@@ -283,6 +465,12 @@ final class MixEngine: @unchecked Sendable {
                 later.outStart += ((-remaining * outgoingRate + 0.6) / bar).rounded(.up) * bar
                 MixLog.write(String(format: "late for the mix point by %.1f s; moving it to %.2f s", -remaining, later.outStart))
                 self.pending = (pending.media, later)
+                // The stems were for the old stretch of the playing song; taking them out there
+                // now would change it while it plays alone.
+                if Self.usesStems(later) {
+                    decks[active].setStemMix(nil)
+                    prepareStems(plan: later, from: active, to: incoming, upcoming: pending.media, normalize: pendingNormalize)
+                }
                 return
             }
             if remaining < -1.5 || left <= length * 0.6 + 1 {
@@ -318,6 +506,13 @@ final class MixEngine: @unchecked Sendable {
             plan.outgoingRate = nil
         }
         settle = nil
+        if Self.usesStems(plan) {
+            let inPlace = stemsInPlace?.plan == plan.id ? stemsInPlace : nil
+            if inPlace?.outgoing != true || inPlace?.incoming != true {
+                plan = Self.withoutStems(plan, outgoing: inPlace?.outgoing == true, incoming: inPlace?.incoming == true)
+                MixLog.write("stems not in place when the overlap began (outgoing \(inPlace?.outgoing == true ? "ready" : "not ready"), incoming \(inPlace?.incoming == true ? "ready" : "not ready")): the bass swap is made with the EQ")
+            }
+        }
         let echoTime = plan.periodA * 0.75
         apply(plan.levels(outgoing: false, at: 0), to: decks[incoming], echoTime: echoTime)
         decks[incoming].rate = Float(plan.rates(at: 0, glide: glide).incoming)
@@ -384,6 +579,7 @@ final class MixEngine: @unchecked Sendable {
     private func finishTransition() {
         guard let running = transition else { return }
         transition = nil
+        clearStems()
         decks[running.from].stop()
         let deck = decks[running.to]
         deck.fadeGain = 1
@@ -409,6 +605,7 @@ final class MixEngine: @unchecked Sendable {
 
     /// Abandons a cued or running mix, leaving the current track playing on its own.
     private func cancelMix(stopIncoming: Bool) {
+        clearStems()
         if let running = transition {
             transition = nil
             let keep = running.handedOver ? running.to : running.from

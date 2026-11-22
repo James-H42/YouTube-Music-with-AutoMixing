@@ -181,7 +181,29 @@ struct MixLoop: Codable, Equatable {
 
 /// Why AutoMix proposed a transition, shown beside it in the editor.
 enum MixReason: String, Codable {
-    case structure, lyrics, similarity, sample, ending, manual
+    /// `tempo`: harmony that lines up once the playing song eases to the next one's tempo, in
+    /// songs that share no material (the sample gate said no), under its own name. Since
+    /// 2026-11-21 (the owner heard MONTERO → Body at 163 % speed and found it unnatural) only
+    /// within `MixPlanner.tempoMatchMaxStretch` (20 %) and `tempoMatchMaxShift` (2 semitones).
+    case structure, lyrics, similarity, sample, tempo, ending, manual
+}
+
+/// Gain of each stem of one deck across an overlap (x: 0 at its start, 1 at its end), in
+/// `StemSeparator.sources` order. 1 leaves a stem as it is; the engine removes `1 - gain` of it.
+struct StemLanes: Codable, Equatable {
+    var drums = MixCurve.constant(1)
+    var bass = MixCurve.constant(1)
+    var other = MixCurve.constant(1)
+    var vocals = MixCurve.constant(1)
+
+    func gains(at progress: Double) -> [Float] {
+        let x = min(1, max(0, progress))
+        return [drums, bass, other, vocals].map { Float(min(1, max(0, $0.value(at: x)))) }
+    }
+
+    var isNeutral: Bool {
+        [drums, bass, other, vocals].allSatisfy { lane in lane.points.allSatisfy { abs($0.y - 1) < 1e-6 } }
+    }
 }
 
 /// A decided transition between two specific tracks. Everything the engine does is in here,
@@ -222,6 +244,10 @@ struct MixPlan: Codable, Equatable, Identifiable {
     var tempo = MixCurve([(0, 0), (0.15, 0), (0.85, 1), (1, 1)])
     var outgoing: DeckLanes
     var incoming: DeckLanes
+    /// Per-stem gains across a synced overlap, when stems are used (`StemSeparator`): the
+    /// outgoing song's vocals stepping aside, bass and drums handed over. Nil plays whole songs.
+    var outgoingStems: StemLanes?
+    var incomingStems: StemLanes?
     var loop: MixLoop?
     var reason: MixReason = .structure
     /// Short description for the interface, e.g. "Blend · 8 bars".

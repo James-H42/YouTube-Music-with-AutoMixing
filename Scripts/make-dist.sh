@@ -37,6 +37,23 @@ cp "$BINARY" "$APP/Contents/MacOS/Metrolist"
 strip -x "$APP/Contents/MacOS/Metrolist" 2>/dev/null || true
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE" 2>/dev/null || true
+# AutoMix's beat model (Beat This!, MIT licence) and its front-end constants. Without them the
+# app falls back to its built-in beat tracker.
+if [[ -d Models/BeatThis.mlpackage ]]; then
+  mkdir -p "$APP/Contents/Resources/Models"
+  cp -R Models/BeatThis.mlpackage Models/BeatThis-window.f32 Models/BeatThis-mel.f32 Models/BeatThis.json Models/BeatThis-LICENSE.txt "$APP/Contents/Resources/Models/"
+else
+  echo "warning: Models/BeatThis.mlpackage missing; AutoMix will use its built-in beat tracker"
+fi
+# The stem model (HT-Demucs, MIT licence, about 200 MB, not in git: make it with
+# Tools/ml/convert_demucs.py Models). Without it, transitions don't use stems.
+if [[ -d Models/HTDemucs.mlpackage ]]; then
+  mkdir -p "$APP/Contents/Resources/Models"
+  cp -R Models/HTDemucs.mlpackage "$APP/Contents/Resources/Models/"
+  [[ -f Models/HTDemucs-LICENSE.txt ]] && cp Models/HTDemucs-LICENSE.txt "$APP/Contents/Resources/Models/"
+else
+  echo "warning: Models/HTDemucs.mlpackage missing; transitions will not use stems"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

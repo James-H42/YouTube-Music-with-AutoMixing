@@ -330,7 +330,7 @@ struct OutputButton: View {
         .popover(isPresented: $showing, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Play through").font(.headline).padding(.bottom, 4)
-                row(title: "System Default", symbol: "macbook.and.iphone", chosen: outputs.selectedUID == nil) { outputs.select(nil) }
+                row(title: systemDefaultTitle, symbol: "macbook.and.iphone", chosen: outputs.selectedUID == nil) { outputs.select(nil) }
                 ForEach(outputs.devices) { device in
                     row(title: device.name, symbol: device.symbol, chosen: device.uid == outputs.selectedUID) { outputs.select(device) }
                 }
@@ -346,6 +346,12 @@ struct OutputButton: View {
             .padding(14)
             .frame(minWidth: 280)
         }
+    }
+
+    /// "System Default", with the output it currently means, so it is clear where sound goes.
+    private var systemDefaultTitle: String {
+        guard let id = OutputDevices.playbackDevice(chosen: nil), let name = outputs.devices.first(where: { $0.id == id })?.name else { return "System Default" }
+        return "System Default (\(name))"
     }
 
     private func row(title: String, symbol: String, chosen: Bool, action: @escaping () -> Void) -> some View {

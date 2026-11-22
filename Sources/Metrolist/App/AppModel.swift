@@ -4,8 +4,8 @@ import Security
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case home, explore, sharedQueue
-    case liked, downloads, albums, artists, savedPlaylists, history
+    case home, explore, concerts, sharedQueue
+    case liked, downloads, musicVideos, albums, artists, savedPlaylists, history
     case localPlaylist(String)
     case remotePlaylist(String)
 }
@@ -16,6 +16,7 @@ enum Route: Hashable {
     case playlist(String)
     case browse(BrowseEndpoint, title: String)
     case search(String)
+    case concert(String)
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -102,8 +103,9 @@ final class AccountStore {
         if let data = try? Data(contentsOf: sessionFile), let cookie = String(data: data, encoding: .utf8), !cookie.isEmpty {
             return cookie
         }
-        // One-time move of a session saved by an earlier build.
-        guard !UserDefaults.standard.bool(forKey: "sessionMigrated") else { return nil }
+        // One-time move of a session saved by an earlier build. Never in a test run, which
+        // must not read the real Keychain.
+        guard !Keychain.isTestRun, !UserDefaults.standard.bool(forKey: "sessionMigrated") else { return nil }
         UserDefaults.standard.set(true, forKey: "sessionMigrated")
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -167,6 +169,45 @@ final class AppModel {
         account = AccountStore(library: library)
         Scrobbler.shared.start()
         Task { await BlockedContent.shared.refreshAIList() }
+        library.onMirrorFailure = { [weak player] message in player?.errorMessage = message }
+        NowPlayingVideo.shared.controller = player
+        NowPlayingVideo.shared.isEnabled = { [settings] in settings.showVideos }
+        NowPlayingVideo.shared.preferredQuality = { [settings] in settings.videoQuality }
+        // A music video or live performance chosen by the listener opens the full-screen
+        // player, where its picture shows, as on YouTube Music.
+        player.onChosenVideo = { [weak self] in
+            guard let self, self.settings.showVideos else { return }
+            withAnimation(.snappy) { self.showExpandedPlayer = true }
+        }
+    }
+
+    // MARK: - Account playlists
+
+    /// Local playlists being copied to the YouTube Music account right now.
+    var uploadingPlaylists: Set<String> = []
+
+    /// Copies a local playlist (an imported one, say) to the signed-in YouTube Music account,
+    /// so it appears on other devices and in Playlists. Returns false if that failed.
+    @discardableResult
+    func addToYouTubeMusic(_ playlistId: String) async -> Bool {
+        guard account.isSignedIn, let playlist = library.playlist(playlistId), playlist.remoteId == nil,
+              !uploadingPlaylists.contains(playlistId) else { return false }
+        uploadingPlaylists.insert(playlistId)
+        defer { uploadingPlaylists.remove(playlistId) }
+        // Already on the account (added before, and the link lost): link, don't copy again.
+        if let copy = library.accountCopy(of: playlist) {
+            library.link(playlistId, toRemote: copy)
+            return true
+        }
+        do {
+            let songs = library.songs(playlist.songIds)
+            let id = try await YTMusic.createPlaylist(title: playlist.name, description: "Imported with Metrolist", videoIds: playlist.songIds)
+            library.link(playlistId, toRemote: PlaylistItem(id: id, title: playlist.name, author: account.account?.name, thumbnail: songs.first?.thumbnail))
+            return true
+        } catch {
+            player.errorMessage = "“\(playlist.name)” couldn't be added to YouTube Music: \(error.localizedDescription)"
+            return false
+        }
     }
 
     // MARK: - Navigation

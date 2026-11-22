@@ -7,6 +7,23 @@ struct LocalPlaylist: Codable, Identifiable, Hashable {
     var name: String
     var songIds: [String]
     var createdAt: Date
+    /// The copy of this playlist on the YouTube Music account, once it has been added there.
+    /// Songs added, removed or renamed here are changed there too.
+    var remoteId: String?
+}
+
+/// A playlist in the sidebar: one kept in this app, or one from the YouTube Music library.
+enum SidebarPlaylist: Identifiable, Hashable {
+    case local(LocalPlaylist)
+    case remote(PlaylistItem)
+
+    /// Stable across launches; used to remember the order the listener arranged.
+    var id: String {
+        switch self {
+        case .local(let playlist): "local:" + playlist.id
+        case .remote(let playlist): "remote:" + playlist.id
+        }
+    }
 }
 
 struct HistoryEntry: Codable, Hashable {
@@ -26,6 +43,9 @@ private struct LibraryData: Codable {
     /// Ids last seen in the YouTube Music library, per kind, used to merge without duplicating
     /// and to notice items removed on another device.
     var synced: [String: [String]] = [:]
+    /// The listener's order of the sidebar's playlists (`SidebarPlaylist.id`s). Playlists
+    /// not in it yet (new ones) follow, in the order they were added.
+    var sidebarOrder: [String] = []
 
     init() {}
 
@@ -40,6 +60,7 @@ private struct LibraryData: Codable {
         history = (try? container.decode([HistoryEntry].self, forKey: .history)) ?? []
         playCounts = (try? container.decode([String: Int].self, forKey: .playCounts)) ?? [:]
         synced = (try? container.decode([String: [String]].self, forKey: .synced)) ?? [:]
+        sidebarOrder = (try? container.decode([String].self, forKey: .sidebarOrder)) ?? []
     }
 }
 
@@ -85,8 +106,26 @@ final class LibraryStore {
             data.artists = merged("artists", local: data.artists.map(\.id), remote: artists.map(\.id)).compactMap { all[$0] }
         }
         if let playlists {
+            let seenBefore = Set(data.synced["playlists"] ?? [])
             let all = Dictionary((data.savedPlaylists + playlists).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
             data.savedPlaylists = merged("playlists", local: data.savedPlaylists.map(\.id), remote: playlists.map(\.id)).compactMap { all[$0] }
+            // An account copy deleted on another device: the local playlist stays, unlinked.
+            // Only when the copy was on the account before and a list that isn't empty (a
+            // failed request) no longer has it; a copy too new to be listed stays linked.
+            let incoming = Set(playlists.map(\.id))
+            if !incoming.isEmpty {
+                for index in data.playlists.indices {
+                    guard let remote = data.playlists[index].remoteId, seenBefore.contains(remote), !incoming.contains(remote) else { continue }
+                    data.playlists[index].remoteId = nil
+                }
+            }
+            // A link lost earlier (or a copy made by an earlier build): an account playlist
+            // with the same name and the same number of songs is this playlist's copy.
+            for index in data.playlists.indices where data.playlists[index].remoteId == nil {
+                if let copy = accountCopy(of: data.playlists[index], among: playlists) {
+                    data.playlists[index].remoteId = copy.id
+                }
+            }
         }
         scheduleSave()
     }
@@ -106,10 +145,34 @@ final class LibraryStore {
                 existing.album = song.album ?? existing.album
                 existing.duration = song.duration ?? existing.duration
                 existing.thumbnail = song.thumbnail ?? existing.thumbnail
+                // The kind of video (official music video, upload, art track) when the page
+                // said; entries saved before it was kept get it this way too.
+                if let type = song.videoType {
+                    existing.videoType = type
+                    existing.isVideo = song.isVideo
+                }
                 data.songs[song.id] = existing
             } else {
                 data.songs[song.id] = song
             }
+        }
+        scheduleSave()
+    }
+
+    /// Saved videos whose kind isn't known yet (saved before it was kept).
+    var untypedVideoIds: [String] {
+        data.songs.values.filter { $0.isVideo && $0.videoType == nil }.map(\.id).sorted()
+    }
+
+    /// Tests: forget a song's type, as in a library saved before it was kept.
+    func setVideoTypesForTesting(_ id: String) { data.songs[id]?.videoType = nil; data.songs[id]?.isVideo = true }
+
+    /// Stores what YouTube Music says each video is. An empty type means it was asked and
+    /// had no answer (a removed video): it stays as it was, and isn't asked about again.
+    func setVideoTypes(_ types: [String: String]) {
+        for (id, type) in types where data.songs[id] != nil {
+            data.songs[id]?.videoType = type
+            if !type.isEmpty { data.songs[id]?.isVideo = Parser.isVideoType(type) }
         }
         scheduleSave()
     }
@@ -157,14 +220,17 @@ final class LibraryStore {
         guard let index = data.playlists.firstIndex(where: { $0.id == id }) else { return }
         remember(songs)
         let existing = Set(data.playlists[index].songIds)
-        data.playlists[index].songIds += songs.map(\.id).filter { !existing.contains($0) }
+        let added = songs.map(\.id).filter { !existing.contains($0) }
+        data.playlists[index].songIds += added
         scheduleSave()
+        if let remote = data.playlists[index].remoteId { mirror { try await YTMusic.addToPlaylist(remote, videoIds: added) } }
     }
 
     func remove(songId: String, fromPlaylist id: String) {
         guard let index = data.playlists.firstIndex(where: { $0.id == id }) else { return }
         data.playlists[index].songIds.removeAll { $0 == songId }
         scheduleSave()
+        if let remote = data.playlists[index].remoteId { mirror { try await YTMusic.removeFromPlaylist(remote, videoIds: [songId]) } }
     }
 
     func moveSongs(inPlaylist id: String, from source: IndexSet, to destination: Int) {
@@ -176,6 +242,77 @@ final class LibraryStore {
     func renamePlaylist(_ id: String, to name: String) {
         guard let index = data.playlists.firstIndex(where: { $0.id == id }) else { return }
         data.playlists[index].name = name
+        if let remote = data.playlists[index].remoteId {
+            if let saved = data.savedPlaylists.firstIndex(where: { $0.id == remote }) { data.savedPlaylists[saved].title = name }
+            mirror { try await YTMusic.renamePlaylist(remote, to: name) }
+        }
+        scheduleSave()
+    }
+
+    /// Repeats a change on the account's copy of a playlist. A failure is reported but the
+    /// local change stands.
+    @ObservationIgnored var onMirrorFailure: ((String) -> Void)?
+    private func mirror(_ change: @escaping () async throws -> Void) {
+        guard InnerTube.shared.isSignedIn else { return }
+        Task {
+            do { try await change() } catch { onMirrorFailure?("The change couldn't be copied to YouTube Music: \(error.localizedDescription)") }
+        }
+    }
+
+    /// Records that a local playlist now has a copy on the account, and lists that copy with
+    /// the library's playlists so it shows in Playlists as on other devices.
+    func link(_ id: String, toRemote remote: PlaylistItem) {
+        guard let index = data.playlists.firstIndex(where: { $0.id == id }) else { return }
+        data.playlists[index].remoteId = remote.id
+        if !data.savedPlaylists.contains(where: { $0.id == remote.id }) { data.savedPlaylists.insert(remote, at: 0) }
+        saveNow()
+    }
+
+    /// The account playlist that is already a copy of a local one: the only one with the
+    /// same name and the same number of songs that no other local playlist is linked to.
+    func accountCopy(of playlist: LocalPlaylist, among candidates: [PlaylistItem]? = nil) -> PlaylistItem? {
+        let taken = Set(data.playlists.compactMap(\.remoteId))
+        let matches = (candidates ?? data.savedPlaylists).filter { item in
+            !taken.contains(item.id) && item.title == playlist.name
+                && Self.trackCount(of: item) == playlist.songIds.count
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// "811 tracks" or "1,204 songs" in a library listing's text, which for the account's own
+    /// playlists sits where other playlists show their author.
+    static func trackCount(of item: PlaylistItem) -> Int? {
+        for text in [item.subtitle, item.author].compactMap({ $0 }) {
+            guard let match = text.firstMatch(of: #/([0-9][0-9,.]*)\s+(?:tracks?|songs?)/#) else { continue }
+            return Int(match.1.filter(\.isNumber))
+        }
+        return nil
+    }
+
+    // MARK: - Sidebar order
+
+    /// Every playlist shown in the sidebar, in the listener's order. A YouTube Music playlist
+    /// that is the account copy of a local one is shown once, as the local one.
+    var sidebarPlaylists: [SidebarPlaylist] {
+        let linked = Set(data.playlists.compactMap(\.remoteId))
+        let all = data.playlists.map(SidebarPlaylist.local) + data.savedPlaylists.filter { !linked.contains($0.id) }.map(SidebarPlaylist.remote)
+        let rank = Dictionary(data.sidebarOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        // Stable: arranged ones by their position, then the rest in their natural order.
+        return all.enumerated().sorted { a, b in
+            let (ra, rb) = (rank[a.element.id], rank[b.element.id])
+            switch (ra, rb) {
+            case let (x?, y?): return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return a.offset < b.offset
+            }
+        }.map(\.element)
+    }
+
+    func moveSidebarPlaylists(from source: IndexSet, to destination: Int) {
+        var ids = sidebarPlaylists.map(\.id)
+        ids.move(fromOffsets: source, toOffset: destination)
+        data.sidebarOrder = ids
         scheduleSave()
     }
 
@@ -230,6 +367,9 @@ final class LibraryStore {
     var mostPlayed: [Song] {
         data.playCounts.sorted { $0.value > $1.value }.prefix(50).compactMap { data.songs[$0.key] }
     }
+
+    /// How often each song has been played, by song id.
+    var playCounts: [String: Int] { data.playCounts }
 
     func recordPlay(_ song: Song) {
         remember([song])

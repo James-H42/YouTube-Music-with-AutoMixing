@@ -7,7 +7,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
-        MainActor.assumeIsolated { DeviceConnect.shared.restoreIfEnabled() }
+        MainActor.assumeIsolated {
+            DeviceConnect.shared.restoreIfEnabled()
+            if WindowTest.isEnabled { WindowTest.run() }
+            // Learns which saved videos are official music videos (see VideoTypeRefresh).
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(8))
+                let model = AppModel.shared
+                await VideoTypeRefresh.run(library: model.library, player: model.player)
+            }
+        }
 
         // Space toggles playback unless the user is typing.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in

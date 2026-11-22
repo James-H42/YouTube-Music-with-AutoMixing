@@ -38,6 +38,7 @@ final class OutputDevices {
     /// Called with the Core Audio id to play through, or nil for the system default.
     @ObservationIgnored var onChange: ((AudioDeviceID?) -> Void)?
     @ObservationIgnored private var listener: AudioObjectPropertyListenerBlock?
+    @ObservationIgnored private var defaultListener: AudioObjectPropertyListenerBlock?
 
     init() {
         selectedUID = UserDefaults.standard.string(forKey: "outputDeviceUID")
@@ -49,6 +50,18 @@ final class OutputDevices {
         }
         listener = block
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+        // Following the system's output: a new default is a new output for the app too.
+        var defaultAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.selectedID == nil else { return }
+                    self.onChange?(nil)
+                }
+            }
+        }
+        defaultListener = defaultBlock
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultAddress, DispatchQueue.main, defaultBlock)
     }
 
     /// The Core Audio id of the chosen output, if it is present.
@@ -86,6 +99,13 @@ final class OutputDevices {
             AudioObjectGetPropertyData(id, &transportAddress, 0, nil, &transportSize, &transport)
             return OutputDevice(id: id, uid: uid, name: name, transport: transport)
         }
+    }
+
+    /// The output the app plays through: the chosen one; else, while bit-perfect output holds
+    /// the output that was the default, that one (macOS moves its default away from a held
+    /// device); else the system default.
+    nonisolated static func playbackDevice(chosen: AudioDeviceID?) -> AudioDeviceID? {
+        chosen ?? BitPerfectOutput.shared.pinnedDefault ?? defaultOutput()
     }
 
     nonisolated static func defaultOutput() -> AudioDeviceID? {

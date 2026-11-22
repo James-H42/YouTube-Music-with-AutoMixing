@@ -1,0 +1,43 @@
+# Common mixes: well-documented sample relationships and classic blends, played from the original
+# into the song that uses it (as P.Y.T. -> Good Life). Used to test that AutoMix finds and places
+# these transitions. Columns: group, kind, query A, query B. Kind: sample (B samples A),
+# interpolation (B re-records A), blend (a known DJ or live blend), mashup.
+# Queries are resolved to video ids by `--analyze` (see resolved-common-mixes.tsv).
+hiphop	sample	Michael Jackson P.Y.T. (Pretty Young Thing)	Kanye West Good Life
+electronic	sample	Daft Punk Harder Better Faster Stronger	Kanye West Stronger
+hiphop	sample	Curtis Mayfield Move On Up	Kanye West Touch The Sky
+hiphop	sample	Ponderosa Twins Plus One Bound	Kanye West Bound 2
+hiphop	sample	Chaka Khan Through the Fire	Kanye West Through the Wire
+hiphop	sample	Labi Siffre My Song	Kanye West I Wonder
+hiphop	sample	Smokey Robinson Will You Love Me Tomorrow	Kanye West Devil In A New Dress
+rock	sample	King Crimson 21st Century Schizoid Man	Kanye West POWER
+hiphop	sample	Otis Redding Try a Little Tenderness	JAY-Z Kanye West Otis
+hiphop	sample	The Moments Love on a Two-Way Street	JAY-Z Empire State Of Mind
+hiphop	sample	Herb Alpert Rise	The Notorious B.I.G. Hypnotize
+hiphop	sample	Mtume Juicy Fruit	The Notorious B.I.G. Juicy
+hiphop	sample	Diana Ross I'm Coming Out	The Notorious B.I.G. Mo Money Mo Problems
+hiphop	sample	Stevie Wonder I Wish	Will Smith Wild Wild West
+hiphop	sample	Stevie Wonder Pastime Paradise	Coolio Gangsta's Paradise
+hiphop	sample	Bill Withers Grandma's Hands	Blackstreet No Diggity
+hiphop	sample	Chic Good Times	The Sugarhill Gang Rapper's Delight
+hiphop	sample	Grover Washington Jr Just the Two of Us	Will Smith Just the Two of Us
+hiphop	sample	The Trammps Rubber Band	The Game Hate It Or Love It
+hiphop	sample	Gil Scott-Heron Home Is Where the Hatred Is	Kanye West My Way Home
+hiphop	sample	Nina Simone Strange Fruit	Kanye West Blood on the Leaves
+hiphop	sample	Ray Charles I Got a Woman	Kanye West Gold Digger
+hiphop	sample	Uncle Luke I Wanna Rock Doo Doo Brown	Travis Scott SICKO MODE
+rock	sample	The Police Every Breath You Take	Puff Daddy I'll Be Missing You
+pop	sample	Rick James Super Freak	MC Hammer U Can't Touch This
+rock	sample	Queen David Bowie Under Pressure	Vanilla Ice Ice Ice Baby
+pop	sample	Dead or Alive You Spin Me Round	Flo Rida Right Round
+electronic	sample	Edwin Birdsong Cola Bottle Baby	Daft Punk Harder Better Faster Stronger
+electronic	sample	Eddie Johns More Spell on You	Daft Punk One More Time
+electronic	sample	Breakwater Release the Beast	Daft Punk Robot Rock
+electronic	sample	George Duke I Love You More	Daft Punk Digital Love
+electronic	sample	Barry Manilow Let's Hang On	Daft Punk Superheroes
+pop	sample	ABBA Gimme Gimme Gimme	Madonna Hung Up
+jpop	sample	Tomoko Aran Midnight Pretenders	The Weeknd Out of Time
+jpop	mashup	Yoko Takahashi A Cruel Angel's Thesis	A Cruel Angel's Yeezus Kanye West x Neon Genesis Evangelion
+electronic	blend	Daft Punk Around the World	Daft Punk Harder Better Faster Stronger
+electronic	blend	Daft Punk Robot Rock	Daft Punk Oh Yeah
+pop	interpolation	Toto Africa	Weezer Africa
