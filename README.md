@@ -30,8 +30,8 @@ and adds bit-perfect output, synced lyrics and a music-video player, in SwiftUI 
 ## Overview
 
 This is a complete YouTube Music app for the Mac, written from scratch in Swift. It follows the
-design of the Android client [Metrolist](https://github.com/MetrolistGroup/Metrolist), so its
-name on your Mac is Metrolist. It is one Swift package of about 37,000 lines and uses only
+design of the Android client [Metrolist](https://github.com/MetrolistGroup/Metrolist), so the
+application is currently named Metrolist on macOS. It is one Swift package and uses only
 Apple's frameworks, with no third-party dependencies.
 
 Its main feature is AutoMix. Instead of a crossfade, AutoMix plans a transition for every pair of
@@ -43,10 +43,10 @@ speed. It can split both songs into vocals, drums and bass during the transition
 stops before the other starts and the basslines swap halfway. The app shows and explains every
 transition, and you can edit any of them.
 
-The rest of the app covers what a music app needs and more. It has bit-perfect output to a DAC,
-word-synced lyrics with readings for Japanese, Korean and Chinese, a full-screen music-video
-player that plays up to 4K, Apple Music's animated covers, concerts near a place you choose,
-scrobbling, and a shared queue that friends can add to from their phones.
+Other features include: bit-perfect output to a DAC, word-synced lyrics, romaji support for
+Japanese, Chinese and Korean, a full-screen music-video player that plays up to 4K,
+Apple Music's animated covers, concerts near a place you choose, scrobbling, and a shared queue
+that friends can add to from the Metrolist mobile application (v14.0 and onwards).
 
 ---
 
