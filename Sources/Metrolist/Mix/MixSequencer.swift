@@ -44,14 +44,16 @@ enum MixSequencer {
         return (min((one - two + 12) % 12, (two - one + 12) % 12), a.isMinor == b.isMinor)
     }
 
-    /// What DJs weigh when they choose the next record, learned on 2026-11-21 from 25 DJ-made
-    /// sequences (Spotify "Mixed By" playlists, Ministry of Sound mix albums, Kanye West & A-Trak's
-    /// Soul Mix Show; `Tools/ml/train_sequencer.py`). Each transition's next song competed against
-    /// four others from the same sequence, in a conditional logit model. Held out by sequence,
-    /// the DJ's choice ranked first 30.1 % of the time against 27.3 % for the hand-set weights this
-    /// replaces (0.5 tempo, 0.3 key, 0.2 artist) and 20 % by chance. Mean reciprocal rank rose by
-    /// 0.024 (95 % interval 0.001 … 0.046). DJs care most about tempo; key matters far less than
-    /// the hand-set weights assumed. Values are log-odds; the tempo gap is in units of 12 %.
+    /// What DJs weigh when they choose the next record, learned on 2026-11-21 from 501 transitions
+    /// in 28 DJ-made sequences (12 Spotify "Mixed By" playlists and 16 parts of DJ-mixed albums,
+    /// among them Kanye West & A-Trak's Soul Mix Show; `Tools/ml/train_sequencer.py`). Each
+    /// transition's next song competed against four others from the same sequence, in a
+    /// conditional logit model. Re-measured on 2026-11-22, held out by sequence: the DJ's choice
+    /// ranked first 29.9 % of the time against 27.8 % for the hand-set weights this replaces (0.5
+    /// tempo, 0.3 key, 0.2 artist) and 20 % by chance. Mean reciprocal rank rose by 0.020, but the
+    /// 95 % interval (−0.002 … 0.040) includes zero, so the gain is not yet clear. DJs care most
+    /// about tempo; key matters far less than the hand-set weights assumed. Values are log-odds;
+    /// the tempo gap is in units of 12 %.
     private enum Learned {
         static let tempoGap = -0.632
         static let tempoOver12 = -0.150

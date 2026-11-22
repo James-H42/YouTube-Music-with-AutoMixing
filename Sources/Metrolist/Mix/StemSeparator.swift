@@ -52,8 +52,9 @@ final class StemSeparator: @unchecked Sendable {
         return separator
     }
 
-    /// Loads the model and runs one silent segment in the background, so the slow first run
-    /// (Core ML preparing the GPU, about 20 s) doesn't fall on a transition.
+    /// Loads the model and runs one silent segment in the background, so a slow first run (Core ML
+    /// preparing the GPU; measured at 0.7 s with warm caches on 2026-11-22) doesn't fall on a
+    /// transition.
     static func warmUp() {
         guard isInstalled else { return }
         DispatchQueue.global(qos: .utility).async {
@@ -95,8 +96,9 @@ final class StemSeparator: @unchecked Sendable {
 
     /// Where someone sings in a separated stretch, in song times: the vocal stem split on
     /// silences of a second or more below -40 dBFS, keeping parts of 0.4 s or longer (the rule
-    /// Mosaikbox uses). Measured on 93 songs, the planner's own guess from the middle band got
-    /// 44 % of bars wrong against this, so a transition decides on this once stems exist.
+    /// Mosaikbox uses). Measured on 88 songs on 2026-11-22 (`Tools/ml/vocal_check.py`), the
+    /// planner's own guess from the middle band got 44 % of bars wrong against this, so a
+    /// transition decides on this once stems exist.
     static func singing(in stems: Stems) -> [ClosedRange<Double>] {
         guard let index = sources.firstIndex(of: "vocals"), stems.audio.count > index else { return [] }
         let left = stems.audio[index][0]

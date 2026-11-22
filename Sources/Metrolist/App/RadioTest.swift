@@ -122,6 +122,20 @@ enum RadioTest {
             let log = (try? String(contentsOf: AppPaths.root.appendingPathComponent("mix.log"), encoding: .utf8)) ?? ""
             for line in log.split(separator: "\n").filter({ $0.contains("autoplay order") }).suffix(3) { print("  log: \(line)") }
         }
+        // 7. Start Radio on the song that is playing (2026-11-21): it carries on where it is.
+        settings.autoMix = false
+        player.play([extra, seed])
+        for _ in 0 ..< 400 where !(player.isPlaying && player.position > 6) { await wait(0.1) }
+        let before = player.position
+        player.playRadio(for: extra)
+        await wait(1)
+        check("Start Radio on the playing song doesn't start it again", player.currentSong?.id == extra.id && before > 6 && player.position >= before,
+              String(format: "%.1f s before, %.1f s after", before, player.position))
+        for _ in 0 ..< 200 where player.queue.count < 6 { await wait(0.1) }
+        check("and its radio replaces what was lined up after it", player.queue.first?.id == extra.id && player.currentIndex == 0
+              && player.queue.dropFirst().allSatisfy { player.isAutoQueued($0.id) } && player.queue.count >= 6 && player.radioSeed == extra.id,
+              player.queue.prefix(4).map(\.title).joined(separator: ", "))
+
         player.pause()
         print(failures == 0 ? "all radio checks passed" : "\(failures) radio checks FAILED")
         exit(failures == 0 ? 0 : 1)

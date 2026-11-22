@@ -82,6 +82,7 @@ enum MixAudit {
         if arguments.contains("--no-record-guess") { MixPlanner.unlinkedRecordGuess = false }
         if arguments.contains("--no-gate") { MixPlanner.sampleGateEnabled = false }
         if let value = option("--ramp").flatMap(Double.init) { MixPlanner.rampMaxStretch = value }
+        if let value = option("--tempo-cap").flatMap(Double.init) { MixPlanner.tempoMatchMaxStretch = value }
         let media = MediaStore()
         let library = LibraryStore()
 

@@ -182,9 +182,9 @@ struct MixLoop: Codable, Equatable {
 /// Why AutoMix proposed a transition, shown beside it in the editor.
 enum MixReason: String, Codable {
     /// `tempo`: harmony that lines up once the playing song eases to the next one's tempo, in
-    /// songs that share no material (the sample gate said no), under its own name. It was kept
-    /// for four owner-saved transitions of this kind, which the owner later said were accidental
-    /// clicks (2026-11-21); whether it stays is the owner's decision.
+    /// songs that share no material (the sample gate said no), under its own name. Since
+    /// 2026-11-21 (the owner heard MONTERO → Body at 163 % speed and found it unnatural) only
+    /// within `MixPlanner.tempoMatchMaxStretch` (20 %) and `tempoMatchMaxShift` (2 semitones).
     case structure, lyrics, similarity, sample, tempo, ending, manual
 }
 

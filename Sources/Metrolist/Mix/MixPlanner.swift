@@ -127,9 +127,10 @@ struct SampleEvidence {
 /// docs/AUTOMIX_REFERENCE_MIXES.md): 204 known sample, interpolation and remix pairs, including
 /// faster and slower replays of same-speed ones, against 826 DJ-adjacent, random and play-history
 /// pairs, also replayed. Folds are grouped by song. The old rule (4.5 σ above the same-speed
-/// alignments) fired on 70 % of those negatives, with up to 60 % speed changes on unrelated songs,
-/// and its ranking was barely better than chance (AUC 0.650). This gate has AUC 0.710 held out. At
-/// its threshold it passes about 8 % of negatives and 41 % of the real matches. Real tempo changes in DJ mixes stay
+/// alignments) fired on 69 % of those negatives, and a model on its one measure ranks barely
+/// better than chance (AUC 0.644). Re-measured on 2026-11-22 with the current build's features
+/// (1,040 pairs, 204 real): this gate's method has AUC 0.713 held out by song, and at its threshold
+/// the shipped gate passes 7.2 % of negatives and 42.6 % of the real matches. Real tempo changes in DJ mixes stay
 /// under 20 % in 98.6 % of transitions (Kim et al., ISMIR 2020), so a missed sample, which falls
 /// back to a blend, costs far less than a false one. The strongest cue is `pitchMargin`: a real
 /// sample matches at one pitch clearly better than at the others.
@@ -196,6 +197,18 @@ enum MixPlanner {
     /// in 5.5 % of transitions and by more than 20 % in 1.4 % (Kim et al., ISMIR 2020), so gaps
     /// past this fade instead. 0 turns ramps off (`--mixaudit --ramp 0`).
     nonisolated(unsafe) static var rampMaxStretch = 0.20
+    /// Largest speed change, and pitch drift in semitones, for a "Tempo match": harmony that
+    /// lines up only at another speed in songs that share no material. Such a pair gets no more
+    /// than a ramp may do (DJs rarely go past 20 %, and transpose by a semitone when they do at
+    /// all). Past this, the pair fades or blends instead. On 2026-11-21 the owner heard MONTERO →
+    /// Body taken to 163 % speed and +7 semitones and found it unnatural; planned without the limit
+    /// on 2026-11-22, 61 of 91 distinct Tempo-match pairs in the style, common and history audits
+    /// moved the tempo more than 25 %. With it, the owner heard MONTERO → Body (now a 7 s fade) and
+    /// judged it good. Samples are not limited: the shared
+    /// material really runs at the other speed. Adjustable for measurement
+    /// (`--mixaudit --tempo-cap x`; 0 leaves Tempo matches unlimited).
+    nonisolated(unsafe) static var tempoMatchMaxStretch = 0.20
+    static let tempoMatchMaxShift = 2
 
     static func harmonicallyCompatible(_ a: TrackAnalysis, _ b: TrackAnalysis, shift: Int = 0) -> Bool {
         let keyB = ((b.key + shift) % 12 + 12) % 12
@@ -1234,10 +1247,15 @@ enum MixPlanner {
             plan.score = 1.12 + Double(match.value - 0.45) * 2 - 0.6 * lostA - 0.5 * skipB
                 + (match.stretch != 1 ? 0.1 : 0) + (match.timeB < 12 ? 0.08 : 0) + (known != nil ? 0.15 : 0)
             if tempoOnly {
+                let rate = plan.periodA / plan.periodB
+                // Nothing shared justifies a big speed or key change, so none is made.
+                if tempoMatchMaxStretch > 0, abs(rate - 1) > tempoMatchMaxStretch || abs(match.shift) > tempoMatchMaxShift {
+                    if debug { print(String(format: "     (tempo match at A %.0f s ↔ B %.0f s dropped: %.0f %% speed, %+d st is past the limit)", match.timeA, match.timeB, rate * 100, -match.shift)) }
+                    continue
+                }
                 // Not a sample: no sample bonus, and below what the same tempo can offer.
                 plan.reason = .tempo
                 plan.score -= 0.35
-                let rate = plan.periodA / plan.periodB
                 plan.note = "The harmony lines up once the playing song \(change(rate, match.shift)) beforehand; the songs share no sampled material"
             }
             result.append(plan)

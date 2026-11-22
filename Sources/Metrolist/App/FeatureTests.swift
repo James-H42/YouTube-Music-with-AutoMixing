@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 
 /// `--featuretest`: offline checks for the features added on 2026-11-19. Run it with
 /// `METROLIST_HOME` pointing at a throwaway folder: it writes a library there.
@@ -29,6 +31,8 @@ enum FeatureTests {
         filterCounts()
         headerCrop()
         stemTiming()
+        lyricWrapping()
+        fullScreenToolbar()
         print(failures == 0 ? "all feature checks passed" : "\(failures) feature check(s) failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -165,6 +169,54 @@ enum FeatureTests {
         check(tabs.first?.videoId == "UlKjIWvPNWY", "tab-separated file with a YouTube link", tabs.description)
         check(PlaylistImporter.youTubeVideoId("https://youtu.be/ATpVIK55l1c?t=3") == "ATpVIK55l1c", "youtu.be links")
         check(PlaylistImporter.youTubeVideoId("https://evil.example/watch?v=ATpVIK55l1c") == nil, "links to other sites are ignored")
+    }
+
+    /// 2026-11-21: the highlighted lyric line is laid out syllable by syllable (`FlowLayout`).
+    /// Words break at spaces, so a line of Japanese was one word wider than the lyrics column
+    /// beside a music video, and the end of it was cut off.
+    private static func lyricWrapping() {
+        final class Frames { var all: [Int: CGRect] = [:] }
+        let frames = Frames()
+        // 頸動脈からアイラブユーが噴き出て アイリスアウト, as BetterLyrics times it: one word, then another.
+        let parts = [("頸動脈", 0), ("から", 0), ("アイ", 0), ("ラブ", 0), ("ユー", 0), ("が", 0), ("噴き", 0), ("出て ", 0), ("アイリス", 1), ("アウト", 1), ("short ", 2), ("words ", 3)]
+        let width: CGFloat = 300
+        let view = FlowLayout {
+            ForEach(parts.indices, id: \.self) { index in
+                Text(parts[index].0)
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .layoutValue(key: FlowWord.self, value: parts[index].1)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("flow")) } action: { frames.all[index] = $0 }
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .coordinateSpace(.named("flow"))
+        let host = NSHostingView(rootView: view)
+        host.frame = CGRect(x: 0, y: 0, width: width, height: 600)
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let placed = parts.indices.compactMap { frames.all[$0] }
+        check(placed.count == parts.count, "every syllable of the line is laid out", "\(placed.count) of \(parts.count)")
+        let widest = placed.map(\.maxX).max() ?? .infinity
+        let firstWord = parts.indices.filter { parts[$0].1 == 0 }.compactMap { frames.all[$0]?.width }.reduce(0, +)
+        check(widest <= width + 0.5, "a line of Japanese without spaces wraps inside the lyrics column", String(format: "reaches %.0f of %.0f pt", widest, width))
+        print(String(format: "  (its first word is %.0f pt wide in a %.0f pt column: kept whole, as before, it overflowed)", firstWord, width))
+        // Words that fit still keep their syllables together on one row.
+        if let a = frames.all[8], let b = frames.all[9] {
+            check(abs(a.midY - b.midY) < 1, "a word that fits is not broken", "\(a) \(b)")
+        }
+    }
+
+    /// 2026-11-21: in macOS full screen the toolbar sat over the top of a music video. While the
+    /// player is open there, it now auto-hides (`ImmersiveWindowChrome.presentation`).
+    private static func fullScreenToolbar() {
+        let fullScreen: NSApplication.PresentationOptions = [.fullScreen, .autoHideMenuBar, .autoHideDock]
+        let decide = ImmersiveWindowChrome.presentation
+        check(decide(fullScreen, true, true, false) == fullScreen.union(.autoHideToolbar), "the player in full screen hides the toolbar until the pointer reaches the top")
+        check(decide(fullScreen.union(.autoHideToolbar), true, true, false) == nil, "and leaves it so")
+        check(decide(fullScreen.union(.autoHideToolbar), false, true, false) == fullScreen, "closing the player in full screen brings the toolbar back")
+        check(decide(fullScreen.union(.autoHideToolbar), true, true, true) == fullScreen, "leaving full screen gives the toolbar back first")
+        check(decide([], true, false, false) == nil, "outside full screen nothing changes")
+        check(decide([.fullScreen], true, true, false) == nil, "never an option set AppKit rejects (auto-hiding toolbar without an auto-hiding menu bar)")
     }
 
     /// Task 10: the count shown beside a filter.

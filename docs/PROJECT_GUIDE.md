@@ -4,7 +4,7 @@ Read this first when continuing development. It gives the state of the project, 
 organised, the rules the owner has set (with their reasons), how to build and test, and what is
 still open. Features are described for users in `README.md`; this guide does not repeat them.
 
-Last updated: 2026-11-21 (night, merged branch). Update the "Status" and "Open items" sections at
+Last updated: 2026-11-22 (morning, merged branch). Update the "Status" and "Open items" sections at
 the end of any session that changes them, and keep the rest in step with the code.
 
 ## What this is
@@ -101,14 +101,14 @@ All are flags to the built binary (`.build/debug/Metrolist <flag>`). Most print 
 | AutoMix | `--mixplan A B` (add `--samples` to look up sample links, `--debug` for detail), `--mixtest A B`, `--mixplay`, `--analyze id`, `--playnexttest`, `--videomixtest` |
 | AutoMix measurement (use `swift build -c release`) | `--mixaudit groups.csv` / `--approved` / `--pairs-file f` (with `--lookup`, `--standout x`, `--no-gate`, `--ramp 0`, `--stems`, `--features out.tsv [--augment 1.25:0,…]`), `--analysisaudit labelsDir`, `--beatmodeltest refDir`, `--dumppcm dir`; `Tools/run_audits.sh BINARY HOME OUT` runs them all |
 | Queue (live) | `--radiotest [--no-order]`: Start Radio with Autoplay on and off, Play Next and Add to Queue order, a radio replaced while loading, Autoplay's order after a Play Next song (release build, about 5 min), settings kept apart |
-| Stems | `--vocalresidue FILE [START…]` (vocal left after the deck's subtraction, measured by separating again), `--stemtest FILE START DIR` (Core ML against PyTorch with `Tools/ml/check_stems.py`, alignment with playback, removal through the deck's own code), `--mixtest A B --stems --lead 25` (a real transition with stems; `--ahead` separates first, as the player does; a short `--lead` without it exercises late stems). Set `METROLIST_MODELS=<repo>/Models` when the binary is built outside the repository |
+| Stems | `--vocalresidue FILE [START…]` (vocal left after the deck's subtraction, measured by separating again), `--stemtest FILE START DIR` (Core ML against PyTorch with `Tools/ml/check_stems.py`, alignment with playback, removal through the deck's own code), `--mixtest A B --stems --lead 25` (a real transition with stems; `--ahead` separates first, as the player does; a short `--lead` without it exercises late stems; use the release build, because the debug build separates too slowly for stems to arrive within the overlap). Set `METROLIST_MODELS=<repo>/Models` when the binary is built outside the repository |
 | Video | `--videoplayertest [query]` (live, end to end), `--videosynctest [query]`, `--videotest query` (`METROLIST_VIDEOQUALITY=2160`), `--videotypes query`, `--typeprobe id…`, `--typerefreshtest` |
 | Streams | `--qualitytest id`, `--audioswap playlistId`, `--matchwhy videoId` (each step of finding a video's audio release), `--ciphertest`, `--potoken` |
 | Artwork | `--amtest artist [album]…`, `--albumshot dir "album"`, `--facetest image` |
 | Sound | `--soundtest [--live]` (live: AutoEQ catalogue), `--bitperfecttest [--live [videoId]]` (live: sets and restores the default output's rate, format and hog mode), `--outputs`, `--outputtest`, `--chaintest` |
 | Library | `--backup`, `--restore`, `--inspect`, `--importforeign`, `--importplaylist`, `--lyricsprobe id`, `--blocktest`, `--scrobbletest`, `--exportifytest` |
 | Devices | `--dctest`, `--sqtest`, `--sqnettest`, `--sqmixtest A B`, `--dcserve s`, `--sqjoin host port`, `--discordtest` |
-| Window | `METROLIST_WINDOWTEST=1` (real main window, full-screen player, tiling; add `METROLIST_WINDOWTEST_PUSH=1` to open a page first) |
+| Window | `METROLIST_WINDOWTEST=1` (real main window, full-screen player, tiling; prints the title bar's visible text). Add `METROLIST_WINDOWTEST_PUSH=1` to open a page first, `_CONCERTS=1` to start on the Concerts page (its toolbar buttons must stay hidden under the player), `_FULLSCREEN=1` to try macOS full screen (a test-launched app can't activate, so it doesn't engage), `_MIX="idA idB"` for a real muted transition with pictures, `_SHOWCASE="idA idB"` for the README screenshots. Pictures go to the test home: `window-*.png` (`cacheDisplay`, no glass or blur) and `screen-*.png` (the window as composited on screen, via `CGWindowListCreateImage` looked up at run time; no screen-recording permission needed for the app's own windows; `screencapture -l` fails without it) |
 | Concerts | `--concerttest [--live]` (offline: parsing, merging, ranking for London/Manchester/a region/the UK/Tokyo/Japan/New York/the US; live: Apple Maps places, MusicBrainz tours, and Ticketmaster when `METROLIST_TICKETMASTER_KEY` is set), `--snapshot dir --concerts`, `--rawpost endpoint client file 'json'` (raw InnerTube replies, for research) |
 
 **Known baseline failures:** `--playnexttest` (3 checks) and `--videomixtest` (1 check) expect
@@ -241,7 +241,33 @@ Tools/                AutoMix ground truth (groundtruth/) and Python ML tools (m
 
 ### AutoMix (`Mix/`)
 
-Described in README "AutoMix". In short:
+Described in README "AutoMix" and in depth in `docs/paper/automix-paper.pdf`.
+
+**The components and how they fit together.** Ten parts, each with one job:
+
+| Part | Kind | Job | Code |
+|---|---|---|---|
+| Track analysis | signal processing | tempo, beats, bars, key, per-beat harmony and tone colour, sections, loudness; once per song, cached as analysis version 7 | `TrackAnalysis.swift` |
+| Beat model | neural network (Beat This!, Core ML) | corrects a grid the tracker counted at 2:3 or 3:2 of the real beat; nothing else | `BeatModel.swift` |
+| Lyrics and sample data | online lookups | line-timed lyrics; sample links from MusicBrainz, or Genius with a token | `Lyrics/`, `SampleDatabase.swift` |
+| Planner | search and scoring | proposes up to six plans per pair (blends, lyric matches, sound matches, sample and tempo matches, ramps, fade) and ranks them | `MixPlanner.swift` |
+| Sample gate | logistic model | decides whether an unlinked match at another speed is real shared material | `SampleGate` in `MixPlanner.swift` |
+| Tempo limit and ramps | rules from DJ statistics | Tempo matches stay within 20 % and 2 semitones; 12–20 % gaps get a slow ramp | `tempoMatchMaxStretch`, `rampMaxStretch` |
+| Stem separator | neural network (HT-Demucs, Core ML) | splits the two stretches an overlap covers into vocals, drums, bass and other, ahead of time | `StemSeparator.swift` |
+| Mix engine | signal processing | two decks: approach, start on the audio clock, phase lock, lanes, stems, hand-over, settle | `MixEngine.swift`, `Playback/AudioEngine.swift` |
+| Sequencer | conditional logit | re-orders Autoplay's next five songs so each mixes well out of the last | `MixSequencer.swift` |
+| Editor and player | UI | show the plan and its reason, let the listener edit it, animate the transition | `UI/Player/MixEditorView.swift`, `AutoMixViews.swift`, `MixTransitionViews.swift` |
+
+They act at four moments. (1) When a song is cached, analysis and the beat model describe it.
+(2) When Autoplay adds songs, the sequencer orders them. (3) When a song becomes next, the planner
+reads both analyses, lyrics and the sample database, filters through the sample gate and the tempo
+limit, ranks the plans and picks one; with stems on, the separator processes the overlap's two
+stretches straight away. (4) About 30 s plus the approach before the mix point, the player hands
+the plan to the engine, which performs it; the editor and the full-screen player read the same
+plan. The plan (`MixPlan`) is the contract between them: mix points, length, beat periods,
+approach, pitch, tempo curve, per-deck lanes, stem lanes, reason and notes.
+
+In short:
 - `TrackAnalysis.swift` analyses tempo, beats, key, harmony, sections and the waveform.
 - `MixPlanner.swift` proposes and ranks transitions. Tempo and pitch moves happen in an
   approach *before* the overlap, on the outgoing song.
@@ -338,7 +364,7 @@ why it works the way it does:
   - `Components/SongViews.swift`: `SongList`, where row clicks are not "chosen" except with
     `playsVideos`.
 
-## Status (2026-11-21, merged branch)
+## Status (2026-11-22, merged branch)
 
 Everything up to the music-video work and album header redesign is committed on `dev`
 (`14aa15f`). The two branches of 2026-11-21 were each committed at the owner's request and
@@ -351,7 +377,138 @@ Nothing is pushed, and `dev` and `main` are unchanged.
 | `claude/automix-all-styles` | `fbe479e` | `docs/automix-progress.md`, `docs/AUTOMIX_REFERENCE_MIXES.md`, `docs/AUTOMIX_BRANCH_MERGE_GUIDE.md`, `Tools/ml/README.md` |
 | `claude/merge-2026-11-21` | the merge of the two | this guide |
 
-**Merge checks:** being run; results will be recorded here.
+### 2026-11-22 (morning): final fixes, measurements again, ready for `dev` and `main`
+
+The owner will commit this branch onto `dev` and merge `dev` into `main` through a GitHub pull
+request. `origin/dev` (`14aa15f`) and `origin/main` (`ca2cecd`) are both ancestors of this branch,
+so `dev` fast-forwards and the pull request has no conflicts. Nothing is committed or pushed.
+Prepared in the worktree, both git-ignored: `COMMIT_MESSAGE.txt` and `PR_DESCRIPTION.md`. Before
+fast-forwarding `dev`, the main checkout's untracked `docs/PROJECT_GUIDE.md` (the 2026-11-20
+version) must be moved aside, or git refuses to overwrite it. The repository root also holds
+`albums`, an 820 KB raw search response ("Grand Theft Auto VI") committed by mistake in `14aa15f`;
+the owner decides whether to `git rm` it.
+
+| Change | Check |
+|---|---|
+| The Concerts page's sort menu and refresh button showed over the full-screen player: the page updates them after its list refreshes, which un-hid them. `ImmersiveWindowChrome` now observes each hidden item's `isHidden` and hides it again | window test with the new `METROLIST_WINDOWTEST_CONCERTS=1`: hidden 1.5 s and 5.5 s after the player opens (before: back at 5.5 s), shown again after it closes |
+| An empty toolbar band over a music video in macOS full screen whenever the controls showed: `TitlebarFader` set the title bar's alpha back to 1. It now keeps it at 0 while the window is in full screen and restores it when the video player goes. The night's `.autoHideToolbar` change did not take effect | builds; not testable from a test run (it can't enter full screen) |
+| MONTERO → Body, now a 7 s fade | the owner heard it: "works and sounds good" |
+| Every figure in the paper, README, social drafts and notes measured again on the current build, songs analysed from scratch | table in `docs/paper/FACTS.md`; outputs in `Tools/ml/data/audit-results/2026-11-22/` |
+| Paper: author "Claude Opus 5.5, extended thinking at xhigh"; components table and "How the parts work together"; limitations of AutoMix and of the research field, with the sources' text read again; Spotify and Apple quotes corrected; 10 pages | compiled, every page checked |
+| Social drafts: the components and how they fit together; today's figures; LinkedIn post 2,930 characters | |
+| Guide: components table in the AutoMix section; `docs/README.md` (new index); `.gitignore` lets `docs/paper/FACTS.md` in | |
+
+What the measurements changed: the learned Autoplay order's gain is no longer statistically clear
+(29.9 % against 27.8 % first choice, mean reciprocal rank +0.020 with a 95 % interval of −0.002 to
+0.040; it read 30.1 % against 27.3 % on 2026-11-21). Unconfirmed "Sample match" is 33 → 6 % of
+style pairs and 24 → 5 % of history (notes said 2 %). Stems: a 20 s stretch takes 2.8 s, not 5 to
+7 s; the first segment took 0.68 s, so the "about 20 s first run" was not reproduced. Vocal residue
+after one pass is −44 to −57 dB and a second pass gains 0 to 7 dB. Without the limit, 61 of 91
+distinct Tempo matches move tempo more than 25 %. The 21 November "pulse, octave, phase" beat-model
+role is no longer in the code and is no longer quoted. Unchanged: beat F 0.796 / 0.814 / 0.953,
+vocaloid tempo 46 → 56 %, the tempo-limit plan counts, stem parity (worst 112.0 dB), the approved
+plans.
+
+Checks on 2026-11-22 (current code): `--featuretest` 47/47; `--radiotest` 14/14 (live, release);
+`--playnexttest` and `--videomixtest` only the 4 known label failures; window test transition view
+PASS ×2; stems ahead ready in 0.0 s and stems late via the EQ then 3.9 s (release build: the debug
+build separates too slowly for the late path); approved pairs byte-identical with and without
+stems; `--stemtest` worst 112.0 dB; `--beatmodeltest` 6/6.
+
+**The merge.** Git found two conflicts: `AppSettings.swift` (kept bit-perfect's `bitPerfect`,
+`exclusiveOutput`, `mixes`, `normalizes`, and the AutoMix branch's `mixOptions` with `stems:`)
+and this guide (merged by hand). `PlayerController.swift`, `AudioEngine.swift`,
+`LibraryBackup.swift`, `SettingsView.swift`, `main.swift` and `README.md` merged cleanly and
+were checked by reading against both merge guides: every change from both sides is there, no
+command-line flag is defined twice, and every README line both branches added is kept. One
+change beyond the textual merge, as the AutoMix guide asked: the stem model's warm-up at launch
+checks `settings.mixes`, so it isn't loaded while bit-perfect output pauses AutoMix. The
+git-ignored stem model, `Tools/ml/data/` (APFS clone) and the ignored notes
+(`docs/automix-progress.md`, `docs/OVERNIGHT_PROGRESS.md`,
+`docs/MERGE_GUIDE_session-2026-11-21.md`) were copied in by hand; they are byte-identical to
+their sources.
+
+**Checks on the merged build (2026-11-21, 22:10–22:25).** Every run had `METROLIST_HOME` in
+`/tmp/claude/mg-*`, `METROLIST_TEST_KEYCHAIN=1`, and a renamed copy of the binary
+(`Metrolist-merge-debug`/`-release`).
+
+| Check | Result |
+|---|---|
+| `swift build`, `swift build -c release` | build; only the existing Swift 6 concurrency warnings |
+| `--featuretest` (fresh home) | 38 PASS, including the 6 stem-timing checks |
+| `--radiotest` (live, release, fresh home) | 12 PASS |
+| `--playnexttest` (clone of `mixhome`) | 17 PASS, 3 FAIL: the known "Sample match"/"Known sample" label checks |
+| `--videomixtest` (clone of `mixhome`) | 5 PASS, 1 FAIL: the known label check |
+| `--mixaudit --approved` and `--approved --stems` (clones of `styleshome`) | byte-identical to `/tmp/claude/approved-check/after-plain.tsv` and `after---stems.tsv` (10 pairs; 9 use stems) |
+| Stems in time: `--mixtest 4tlUwgtgdZA -3PKrJgxHK8 --stems --lead 5 --ahead` | "stems ready in 0.0 s (separated ahead)", no "not in place" line |
+| Stems late: the same with `--lead 3`, no `--ahead` | "stems not in place … the bass swap is made with the EQ", then ready in 3.5 s, read 5.9 s into the overlap (late) |
+| `--stemtest` (4tlUwgtgdZA at 60 s) and `Tools/ml/check_stems.py` | PASS, lag 0; against PyTorch worst stem 112.0 dB (PASS needs 40) |
+| `--bitperfecttest` (offline) | 22/22, including "AutoMix is paused but its setting kept" and "nothing processes the samples" |
+| `--soundtest` | 17 PASS |
+| `--concerttest` / `--concerttest --live` | 54 PASS / all PASS, Ticketmaster skipped (no key); 30 artists through MusicBrainz in 40 s |
+| `--outputtest` | all 3 outputs accepted |
+| `--videoplayertest` (live) | 24/24 |
+| `METROLIST_WINDOWTEST=1 METROLIST_WINDOWTEST_PUSH=1` | no `navigationStack.back` item while the full-screen player is open; it is back after closing; frame unchanged |
+| `--snapshot dir --concerts` | the empty prompt is centred; slayr's listing without a picture shows the artist's |
+| Bit-perfect and AutoMix together (live, owner-approved; a temporary `--togethertest` built in a scratch copy, not in the branch) | 13/13: P.Y.T. → Good Life with AutoMix and stems on and bit-perfect on: nothing planned or prepared, no processing stages, the songs joined without a reload, no mix ran, no "cued" or "stems" lines in `mix.log`; turning bit-perfect off left the External Headphones as before (48 kHz, 32-bit float, which was already their deepest format, so nothing had to be switched or restored) |
+| Owner's settings and data | `app.metrolist.mac.automix` and `Metrolist` preference domains byte-identical before and after (`autoplay` still `1`); nothing in `~/Library/Application Support/Metrolist` changed; output devices' rates unchanged |
+
+Settings showing the orange "Paused while bit-perfect output is on" note when both are on was
+checked by reading only (no capture renders the AutoMix section). A command-line run never gets
+the app's quit-time restore of the output (`BitPerfectOutput.restoreAll` runs on
+`willTerminate`), so live bit-perfect tests must switch the setting off before exiting.
+
+Not run:
+- The session guide's "owner placement 19 of 21": disregarded, as the AutoMix guide says (it
+  measured the accidental custom transitions).
+- The packaged `dist/Metrolist.app` (rebuilt here at 22:24, both models bundled, 217 MB) was
+  not launched: as a bundle it uses the owner's real preference domain.
+
+**After the merge (2026-11-21 night, uncommitted on this branch; owner's list from their test of
+the merged app).** Working note: `docs/OVERNIGHT_2026-11-21_PROGRESS.md` (git-ignored).
+- **Tempo match limited.** MONTERO → Body was planned as a "Tempo match" at 163 % speed and +7
+  semitones (Body counted at double time, a ratio just inside the old 0.62–1.6 range). Tempo
+  matches (gate closed, no shared material) now keep within 20 % and 2 semitones
+  (`MixPlanner.tempoMatchMaxStretch`/`tempoMatchMaxShift`; `--mixaudit --tempo-cap x` to
+  measure). MONTERO → Body is now a 7 s fade. Approved pairs byte-identical. Over 237 audit
+  pairs (style groups and common mixes, same analyses before and after): Tempo matches 51 → 10
+  (none over 20 %), plans stretching over 20 % 51 → 13 (samples, plus 3 tempo ramps at rates 1.22 to 1.23), fades 34 → 59, sound
+  matches 25 → 38, synced 194 → 156. Two non-tempo plans changed as a side effect (dropped tempo
+  matches no longer fill the planner's three slots): a rock pair's Sample match became a Sound
+  match, and a J-pop sound match moved.
+- **Page title over the full-screen player** removed: SwiftUI turned the window title back on as
+  the page underneath updated; `ImmersiveWindowChrome` keeps it hidden (KVO on
+  `titleVisibility`). Window test: no title text while the player is open, title-bar height
+  unchanged.
+- **ⓘ for "Keep the output to Metrolist alone"** works: the disabled toggle disabled its ⓘ
+  too. Only the switch is disabled now (`LabeledContent`); the label dims; the explanation says
+  it needs bit-perfect output.
+- **Highlighted lyrics cut off** (Japanese beside a music video): `FlowLayout` kept a word whole
+  even when wider than the column; it now breaks between syllables when a word doesn't fit
+  (`FlowWord` layout value). `--featuretest` checks it.
+- **Bar over a full-screen music video**: in macOS full screen the toolbar lives in its own
+  window; while the player is open there it now auto-hides (`.autoHideToolbar`,
+  `ImmersiveWindowChrome.presentation`, checked offline by `--featuretest`). A test-launched app
+  can't make itself active to enter full screen, so the real thing is unverified.
+- **New: transition view** (owner's design). During an AutoMix transition the next song's cover
+  slides in beside the playing one, the backdrop splits between their colours, and at the
+  hand-over the old cover slides away and the new one centres (`MixTransitionViews.swift`,
+  `PlayerController.mixIncoming`). Checked through a real muted transition
+  (`METROLIST_WINDOWTEST_MIX`); the owner saw it and approved.
+- **Start Radio on the playing song** no longer restarts it: the radio replaces what comes
+  after (`continueAsRadio`). `--radiotest` 14/14 with two new checks.
+- **Found while testing (pre-existing since `dev` 14aa15f):** seeking, or the preview button,
+  after a transition was cued lost it, and the next song followed after a gap
+  (`MixEngine.seek` drops the cue; the player never re-cued). `PlayerController.seek` now
+  resets `gaplessKey`.
+- **New technical paper** on AutoMix version 2: `docs/paper/automix-paper.pdf` (source
+  `automix-paper.tex`, IEEEtran, built with `tectonic -X compile`; sources of every fact in
+  `docs/paper/FACTS.md`, git-ignored). The 14 November 2026 paper stays in `docs/` as the record
+  of version 1.
+- **README rewritten** as the GitHub page, with screenshots from the running app
+  (`docs/images/`, made by `METROLIST_WINDOWTEST_SHOWCASE` in a home holding only two songs).
+- Checks: `--featuretest` 47/47, `--radiotest` 14/14, `--playnexttest`/`--videomixtest` only
+  the 4 known label failures, approved pairs byte-identical, window tests above.
 
 **From `claude/session-2026-11-21` (2026-11-21 overnight and afternoon):**
 - Bit-perfect output, exclusive output, the signal path and AutoEQ headphone search, from
@@ -438,7 +595,19 @@ Design notes for earlier work are in the main checkout's `docs/` (git-ignored, n
 ## Open items
 
 Waiting on the owner:
-- Review branch `claude/merge-2026-11-21`, and merge it into `dev` if it is good.
+- Commit branch `claude/merge-2026-11-21` onto `dev` and open the pull request into `main` (the
+  owner's plan, 2026-11-22). See Status 2026-11-22 for the untracked guide in the main checkout
+  and the stray `albums` file.
+- A look at Settings › Playback with bit-perfect output and AutoMix both on: it should show
+  AutoMix paused (the playback side was checked live on 2026-11-21).
+- In the real app: a music video in macOS full screen (no band at the top while the controls
+  show; fixed 2026-11-22, untestable from a test run); the Concerts page under the full-screen
+  player (no sort menu or refresh button); a playlist or album page under the
+  full-screen player (no title); the ⓘ beside "Keep the output to Metrolist alone" with
+  bit-perfect off; Japanese word-synced lyrics beside a music video; scrubbing near a
+  transition (it should still mix); listening to pairs that used to be big Tempo matches (now
+  mostly fades or sound matches).
+- `README.md` and `docs/images/` are new: review before pushing.
 - A visual check of the full-screen player's title bar (no grey band) in a maximised and a
   tiled window; offscreen captures can't show it. Window tiling itself couldn't be exercised
   (the debug build has no Window › Fill item); the window frame stays the same.
@@ -466,29 +635,30 @@ AutoMix learned parts and stems (waiting on the owner, 2026-11-21):
 - **Listen with "Mix with stems" on and off.** Nine of the ten approved pairs now add stem moves
   (the mix points are unchanged): the outgoing vocals step aside when both songs sing, the
   basslines swap halfway, and the drums hand over in blends.
-- **Decide whether "Tempo match" (big tempo-eased jumps between unrelated songs) should stay.**
-  It was kept for 4 saved transitions of this kind, which the owner has since said were
-  accidental clicks, so nothing of the owner's supports it now. DJs rarely move tempo more than
-  20 %. Several played in the owner's 2026-11-21 test, which they said mostly worked.
+- **"Tempo match" is now limited to 20 % and 2 semitones** (2026-11-21 night, after the owner
+  found MONTERO → Body at 163 % unnatural). On 2026-11-22 the owner heard MONTERO → Body (now a
+  7 s fade) and judged it good. The other former Tempo matches haven't been heard.
 - **Listen to stem transitions again** after the 2026-11-21 evening fixes, including with the
   preview button (which now starts 10 s ahead while stems are still being separated).
 - **Hear the 12–20 % tempo ramps** on pairs that used to fade.
 
 AutoMix learned parts and stems (not done):
 - If vocals still bleed with the timing fixed: a stronger vocal model (HT-Demucs fine-tuned).
-  Separating again finds only −37 to −57 dB of vocal left, but the model can't see vocals it
-  puts in "other".
+  Separating again finds only −44 to −57 dB of vocal left (2026-11-22, six songs), but the
+  model can't see vocals it puts in "other".
 - Other code still writes settings to `UserDefaults.standard` directly (`OutputDevices`,
   `BlockedContent`, `Scrobbler`, `LyricsService`, Device Connect, and `ConcertStore`); moving
   them to `AppPaths.settings` would keep tests off those too. `OutputDevices` matters most,
   because the bit-perfect and output tests choose devices.
 - Stem-measured singing in the analysis itself, so mix points are chosen on it. The mid-band
-  guess gets 44 % of bars wrong without lyrics. Separating a whole song costs about 20 s per
-  song on top of analysis.
+  guess gets 44 % of bars wrong without lyrics. Separating a whole four-minute song would cost
+  about 35 s on top of analysis (2.8 s per 20 s on 2026-11-22).
 - Drum-pattern similarity for the drum rule. Today it applies to all blends and tempo matches.
 - Re-weighting the clash penalty now that stems can remove a vocal clash.
 - The Spotify and album songs (`refhome-b`, `refhome-c`) are analysed but not yet used for the
   gate's negatives. MixesDB sets are not yet resolved to songs.
+- The learned Autoplay order's gain over the hand-set weights is within chance on 28 sequences
+  (2026-11-22). More DJ-made sequences would settle whether it helps.
 - Optional: the signal path's `processingStages` could say "AutoMix (stems)" while a stem
   transition plays.
 

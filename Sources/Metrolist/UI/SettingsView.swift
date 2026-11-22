@@ -121,10 +121,19 @@ struct SoundSettings: View {
                 Toggle(isOn: $settings.bitPerfect) {
                     Text("Bit-perfect output").info(Explain.bitPerfect)
                 }
-                Toggle(isOn: $settings.exclusiveOutput) {
-                    Text("Keep the output to Metrolist alone").info(Explain.exclusive)
+                // Only the switch is disabled without bit-perfect output: a disabled label would
+                // switch its ⓘ off too, and the explanation is most wanted while it is unavailable.
+                LabeledContent {
+                    Toggle("Keep the output to Metrolist alone", isOn: $settings.exclusiveOutput)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .disabled(!settings.bitPerfect)
+                } label: {
+                    Text("Keep the output to Metrolist alone")
+                        .foregroundStyle(settings.bitPerfect ? .primary : .secondary)
+                        .info(Explain.exclusive)
                 }
-                .disabled(!settings.bitPerfect)
                 Text("Plays the audio exactly as it was decoded. The equalizer, loudness normalisation and AutoMix pause while it is on.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -166,7 +175,7 @@ struct SoundSettings: View {
 /// The hover explanations (ⓘ) for the Output settings, in plain words.
 private enum Explain {
     static let bitPerfect = "Sends the sound to your headphones, speakers or DAC exactly as it was decoded, with nothing in Metrolist changing it. The output is switched to the song's own sample rate, and the equalizer, loudness normalisation and AutoMix pause. The volume slider then controls the device's own volume (the same as the volume keys), so the audio itself is never turned down in the app. Worth turning on with wired headphones or an external DAC; leave it off if you want AutoMix or the equalizer."
-    static let exclusive = "Gives Metrolist sole use of the output while it plays, so no other app, notification or alert sound is mixed in and nothing can change its sample rate. While it is on, macOS sends other apps' sound to another output, such as the built-in speakers. Everything goes back to normal when you turn this or bit-perfect output off, or quit Metrolist."
+    static let exclusive = "Gives Metrolist sole use of the output while it plays, so no other app, notification or alert sound is mixed in and nothing can change its sample rate. While it is on, macOS sends other apps' sound to another output, such as the built-in speakers. Everything goes back to normal when you turn this or bit-perfect output off, or quit Metrolist. Available while bit-perfect output is on."
     static let signalPath = "Every step the sound takes from YouTube's stream to your output, checked once a second. A green tick means that step leaves the audio untouched; an orange warning shows what is changing it."
     static let source = "What YouTube sends: the audio format, its bitrate, sample rate and number of channels. YouTube's audio is compressed (Opus), so bit-perfect output keeps it exactly as decoded rather than making it lossless."
     static let output = "The device the sound is playing through, the sample rate it is running at and the bit depth it is fed."

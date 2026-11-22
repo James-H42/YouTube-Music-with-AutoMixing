@@ -73,7 +73,8 @@ Reviews report:
 ### Real DJs: measured on 1,557 mixes
 
 T. Kim, M. Choi, E. Sacks, Y.-H. Yang and J. Nam, "A Computational Analysis of Real-World DJ
-Mixes using Mix-To-Track Subsequence Alignment" (ISMIR 2020, pp. 764–770). The data is 1,557 mixes from 1001Tracklists: 13,728
+Mixes using Mix-To-Track Subsequence Alignment" (ISMIR 2020, pp. 764–770;
+doi:10.5281/zenodo.4245544). The data is 1,557 mixes from 1001Tracklists: 13,728
 tracks and 20,765 transitions, mostly house and trance. The tracks were aligned to the mixes
 with beat-synchronous chroma and MFCC subsequence DTW. Findings:
 - **Tempo changes are small.** "86.1% of the tempo are adjusted less than 5%, 94.5% are less
@@ -243,7 +244,8 @@ stems in three moves:
 
 The known weakness is artifacts on dense bass.
 
-**Mosaikbox** (Sowula and Knees, ISMIR 2024, pp. 850–857, code at github.com/robaerd/mosaikbox) is
+**Mosaikbox** (Sowula and Knees, ISMIR 2024, pp. 850–857, doi:10.5281/zenodo.14877463, code at
+github.com/robaerd/mosaikbox) is
 the one evaluated automatic mixer with stems.
 - **Separation:** HT-Demucs into four stems.
 - **Vocal rule:** vocal segments come from the vocal stem, split on silences of at least 1 s
@@ -262,7 +264,8 @@ the one evaluated automatic mixer with stems.
 
   The stem rules were the significant step (Wilcoxon, Holm-corrected p < 0.0001).
 
-**HT-Demucs** (Rouard, Massa and Défossez, ICASSP 2023; MIT licence, 42 M parameters) is the
+**HT-Demucs** (Rouard, Massa and Défossez, ICASSP 2023, doi:10.1109/ICASSP49357.2023.10096956;
+MIT licence, 42 M parameters) is the
 usual open model. Core ML and MLX ports exist.
 
 ## What AutoMix learned from these sets (2026-11-21)
@@ -275,9 +278,11 @@ All of it is measured; none of it has been heard. The owner's listening decides.
      matches at one pitch clearly better than at the others.
    - Training data: 204 positive pairs (the sample, interpolation and remix sets, plus faster and
      slower replays of same-speed pairs) against 826 DJ-adjacent, random and play-history pairs.
-   - Held out by song, AUC 0.710 against 0.650 for the old 4.5σ rule.
-   - Unrelated songs no longer get "Sample match": 33 % → 2 % of random style pairs, and 24 % → 2 %
-     of the owner's play history.
+   - Re-measured on 2026-11-22 with the current build's features (1,040 pairs, 204 real): held
+     out by song, AUC 0.713 against 0.644 for the old 4.5σ rule's measure. The old rule fired on
+     69 % of the negatives; the shipped gate passes 7.2 % of them and 42.6 % of the real matches.
+   - Unrelated songs rarely get "Sample match" now: 33 % → 6 % of random style pairs, and 24 % → 5 %
+     of the owner's play history (2026-11-22, current build with the tempo limit).
    - The same tempo-eased move stays available, under its own name, "Tempo match". It ranks
      below what the same tempo offers. It was first kept because four of the owner's saved
      transitions used it, but on 2026-11-21 the owner said those saved transitions were
@@ -291,25 +296,29 @@ All of it is measured; none of it has been heard. The owner's listening decides.
    instead of a fade. DJs move tempo more than 20 % in only 1.4 % of transitions, so beyond that
    it stays a fade.
 3. **Autoplay ordering** (`MixSequencer`, `Tools/ml/train_sequencer.py`).
-   - Model: a conditional logit over pools of five, trained on 25 DJ-made sequences and held out
-     by sequence.
-   - The DJ's next song ranks first 30.1 % of the time, against 27.3 % for the old hand-set
-     weights and 20 % by chance. Mean reciprocal rank rose by 0.024 (95 % interval
-     0.001 … 0.046).
+   - Model: a conditional logit over pools of five, trained on 501 transitions in 28 DJ-made
+     sequences (12 Spotify "Mixed By" playlists and 16 parts of 6 mix albums) and held out by
+     sequence.
+   - Re-measured on 2026-11-22: the DJ's next song ranks first 29.9 % of the time, against 27.8 %
+     for the old hand-set weights and 20 % by chance. Mean reciprocal rank rose by 0.020, but the
+     95 % interval (−0.002 … 0.040) includes zero, so the gain is not yet clear. (On 2026-11-21
+     it read 30.1 % against 27.3 %, interval 0.001 … 0.046; the libraries' analyses have changed
+     since.)
    - DJs weigh tempo most and key much less than the old weights did.
 4. **Stems in transitions** (`StemSeparator`, `MixPlan.outgoingStems` / `incomingStems`, the
    "Mix with stems" setting).
    - HT-Demucs runs through Core ML on the two stretches of an overlap only. The output matches
-     PyTorch at 115 to 122 dB SDR.
-   - Each 7.8 s segment takes 0.5 s; a 20 s stretch takes 5 to 7 s at 48 kHz, done when the
-     transition is queued.
+     PyTorch at 112.0 to 126.1 dB SDR (2026-11-22; pass mark 40 dB).
+   - On 2026-11-22 the model loaded in 1.3 s, a 7.8 s segment took 0.68 s including the first
+     run, and a 20 s stretch took 2.8 s at 48 kHz, done when the transition is decided.
    - The engine removes `1 − gain` of each stem from the samples it plays. They are aligned with
      playback to the sample: Opus files are 3.5 ms out between decoding and playback, and that
      is corrected.
    - Rules: Mosaikbox's vocal rule, decided on the separated vocal stems when the transition is
      prepared. A bass swap at the midpoint. A drum hand-over in blends and tempo matches.
    - Without lyrics, the planner's own vocal guess got 44 % of bars wrong against the vocal stem
-     (93 songs, pooled AUC 0.644). That is why the vocal decision waits for the stems.
+     (88 songs with current analyses, pooled AUC 0.642, 2026-11-22). That is why the vocal
+     decision waits for the stems.
 
 ## Data sets for training and labels
 
@@ -400,7 +409,7 @@ against all of them, and against the approved pairs.
 - Spotify support, Mixed playlists: https://support.spotify.com/ae-en/article/mixed-playlists/
 - Spotify newsroom: https://newsroom.spotify.com/2025-08-19/mix-your-favorite-playlists-seamlessly-by-adding-your-own-transitions/ , https://newsroom.spotify.com/2025-09-22/mixed-playlists-debut-martin-garrix-pinkpantheress-sofi-tukker/ , https://newsroom.spotify.com/2025-12-17/new-years-eve-party-playlists/
 - Apple newsroom (June 2025): https://www.apple.com/my/newsroom/2025/06/apple-services-deliver-powerful-features-and-intelligent-updates-to-users-this-fall ; Apple support: https://support.apple.com/guide/iphone/aside/iphcba31c44b/ios ; heise: https://heise.de/-11139247 ; MacRumors: https://www.macrumors.com/2025/06/12/ios-26-automix-apple-music/
-- Kim et al., ISMIR 2020: https://arxiv.org/abs/2008.10267 ; https://mir-aidj.github.io/djmix-analysis ; https://github.com/mir-aidj/djmix-dataset
+- Kim et al., ISMIR 2020: https://doi.org/10.5281/zenodo.4245544 ; https://arxiv.org/abs/2008.10267 ; https://mir-aidj.github.io/djmix-analysis ; https://github.com/mir-aidj/djmix-dataset
 - Mixed In Key, Camelot and energy boost: https://mixedinkey.com/workflows/how-to-use-the-camelot-wheel/ , https://mixedinkey.com/Book/Use-Advanced-Harmonic-Mixing-Techniques/
 - Mashup theory: https://www.lalal.ai/blog/a-guide-to-mashups/ , https://magneticmag.com/2024/07/how-to-make-a-good-mashup/
 - Harmonix Set: https://github.com/urinieto/harmonixset ; Beat This! annotations: https://github.com/CPJKU/beat_this_annotations

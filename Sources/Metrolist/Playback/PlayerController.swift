@@ -37,6 +37,9 @@ final class PlayerController {
     private(set) var lyricsLoading = false
     /// The transition in progress, if AutoMix is blending two tracks right now.
     private(set) var mixActivity: MixEngine.Activity?
+    /// The song a running transition is bringing in, from its start until it takes over half-way
+    /// through. The full-screen player shows both covers meanwhile (`MixCoverStage`).
+    private(set) var mixIncoming: Song?
     /// Tempo, key and structure of tracks analysed for AutoMix, by video id.
     private(set) var analyses: [String: TrackAnalysis] = [:]
     /// Transitions AutoMix proposes for a pair of songs ("current|next"), best first.
@@ -208,6 +211,12 @@ final class PlayerController {
                 guard let self else { return }
                 // Publish in coarse steps so the interface isn't redrawn a hundred times a second.
                 if let activity, let current = self.mixActivity, abs(activity.progress - current.progress) < 0.02, activity.progress < 1 { return }
+                if let activity, self.mixActivity == nil, activity.progress < 0.5 {
+                    // A transition has started: the song after this one is coming in.
+                    self.mixIncoming = self.nextSong
+                } else if activity == nil {
+                    self.mixIncoming = nil
+                }
                 self.mixActivity = activity
             }
         }
@@ -751,6 +760,8 @@ final class PlayerController {
 
     /// Tests: what the audio-release lookup will answer for a video, without the network.
     func setAudioVersionForTesting(_ videoId: String, _ audio: Song?) { counterparts[videoId] = .some(audio) }
+    /// Silences the engine while the volume setting keeps its level (screenshots of a playing app).
+    func muteOutputForTesting() { engine.volume = 0 }
 
     /// Does ahead of time what `loadCurrent` does when a video starts: finds its audio release
     /// and puts it in the queue, so AutoMix analyses and plans against what will really play.
@@ -831,8 +842,36 @@ final class PlayerController {
     /// without Autoplay. Before 2026-11-21 this only played the song: the radio came from
     /// Autoplay, so with Autoplay off the queue held the one song.
     func playRadio(for song: Song) {
+        // Started for the song already playing (or the video whose audio release is playing):
+        // it carries on where it is instead of starting again, and the radio replaces what was
+        // lined up after it.
+        if let currentIndex, let current = currentSong, current.id == song.id || (counterparts[song.id] ?? nil)?.id == current.id {
+            continueAsRadio(seed: song.id, from: currentIndex)
+            return
+        }
         play([song])
         radioSeed = song.id
+        extendQueueIfNeeded()
+    }
+
+    /// Turns the queue into a radio after the playing song, without touching playback. A
+    /// transition already under way keeps the song it is mixing into; the radio follows that.
+    private func continueAsRadio(seed: String, from index: Int) {
+        let last = mixActivity != nil && index + 1 < queue.count ? index + 1 : index
+        queue = Array(queue[index ... last])
+        currentIndex = 0
+        unshuffledQueue = nil
+        shuffle = false
+        sourceId = nil
+        playingAlbumId = nil
+        playNextIds = []
+        radioContinuation = nil
+        radioSeed = seed
+        queueGeneration += 1
+        extendBlockedUntil = .distantPast
+        // A song cued to follow the playing one is let go on the next tick, as for any change
+        // to what comes next.
+        persist()
         extendQueueIfNeeded()
     }
 
@@ -1013,6 +1052,10 @@ final class PlayerController {
             resumePosition = target
         } else {
             engine.seek(to: target)
+            // The engine lets go of a cued transition when it seeks; hand the next song over
+            // again on the next tick. Without this, seeking (or the preview button) once the
+            // transition was cued lost it, and the next song followed after a gap.
+            gaplessKey = nil
         }
         publishNowPlaying()
     }
@@ -1246,6 +1289,8 @@ final class PlayerController {
         guard let currentIndex, currentIndex + 1 < queue.count, queue[currentIndex + 1].id == videoId else { return }
         loadToken += 1
         let song = queue[currentIndex + 1]
+        // The incoming song has taken over: the full-screen player centres its cover.
+        mixIncoming = nil
         self.currentIndex = currentIndex + 1
         becameCurrent(song)
         gaplessKey = nil

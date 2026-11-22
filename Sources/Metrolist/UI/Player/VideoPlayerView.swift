@@ -312,15 +312,25 @@ private struct TitlebarFader: NSViewRepresentable {
     let hidden: Bool
     func makeNSView(context: Context) -> FaderView { FaderView() }
     func updateNSView(_ view: FaderView, context: Context) { view.setHidden(hidden) }
-    static func dismantleNSView(_ view: FaderView, coordinator: ()) { view.setHidden(false) }
+    static func dismantleNSView(_ view: FaderView, coordinator: ()) { view.restore() }
 
     final class FaderView: NSView {
         private weak var titlebar: NSView?
+        private var wantsHidden = false
+        private var fullScreenObservers: [NSObjectProtocol] = []
 
         func setHidden(_ hidden: Bool) {
+            wantsHidden = hidden
+            apply()
+        }
+
+        /// In macOS full screen the title bar is an empty band across the top of the video
+        /// (its buttons only appear with the menu bar): it stays hidden there, and shows with
+        /// the controls only in a window.
+        private func apply() {
             if titlebar == nil { titlebar = window?.standardWindowButton(.closeButton)?.superview?.superview }
-            guard let titlebar else { return }
-            let alpha: CGFloat = hidden ? 0 : 1
+            guard let titlebar, let window else { return }
+            let alpha: CGFloat = wantsHidden || window.styleMask.contains(.fullScreen) ? 0 : 1
             guard titlebar.alphaValue != alpha else { return }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.35
@@ -328,9 +338,29 @@ private struct TitlebarFader: NSViewRepresentable {
             }
         }
 
+        /// Leaving the video (for the cover player, or closing the player) shows the title bar
+        /// again, in full screen too, so the window's buttons come back on leaving full screen.
+        func restore() {
+            for observer in fullScreenObservers { NotificationCenter.default.removeObserver(observer) }
+            fullScreenObservers = []
+            titlebar?.alphaValue = 1
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if window == nil { titlebar?.alphaValue = 1 }
+            for observer in fullScreenObservers { NotificationCenter.default.removeObserver(observer) }
+            fullScreenObservers = []
+            guard let window else { titlebar?.alphaValue = 1; return }
+            for name in [NSWindow.willEnterFullScreenNotification, NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+                fullScreenObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                })
+            }
+            apply()
+        }
+
+        deinit {
+            for observer in fullScreenObservers { NotificationCenter.default.removeObserver(observer) }
         }
     }
 }

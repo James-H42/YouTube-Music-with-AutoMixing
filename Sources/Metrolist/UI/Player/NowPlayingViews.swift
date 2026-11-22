@@ -239,25 +239,18 @@ struct ExpandedPlayerView: View {
             let artSize = split
                 ? min(geometry.size.width * 0.34, geometry.size.height * 0.5, 440)
                 : min(geometry.size.width * 0.5, geometry.size.height * 0.54, 560)
+            let columnWidth = split ? geometry.size.width * 0.44 : geometry.size.width
             ZStack {
-                ArtworkView(url: player.currentSong?.thumbnail, size: max(geometry.size.width, geometry.size.height), cornerRadius: 0, pixelSize: 240)
-                    .blur(radius: 90, opaque: true)
-                    .overlay(.black.opacity(0.55))
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
-                    // Nothing of the page shows through, even before the artwork loads.
-                    .background(Color.black)
+                MixBackdrop(current: player.currentSong, incoming: player.mixIncoming, size: geometry.size)
 
                 HStack(spacing: 0) {
                     VStack(spacing: 18) {
                         Spacer(minLength: 0)
-                        ArtworkView(url: player.currentSong?.thumbnail, size: artSize, cornerRadius: 16, pixelSize: 1000)
-                            .id(player.currentSong?.thumbnail)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                            .animation(.easeInOut(duration: 0.9), value: player.currentSong?.thumbnail)
-                            .shadow(color: .black.opacity(0.45), radius: 30, y: 14)
-                            .scaleEffect(player.isPlaying ? 1 : 0.92)
-                            .animation(.spring(duration: 0.5), value: player.isPlaying)
+                        // During an AutoMix transition, the next song's cover joins this one.
+                        MixCoverStage(
+                            current: player.currentSong, incoming: player.mixIncoming, mixing: player.mixActivity != nil,
+                            artSize: artSize, width: columnWidth, isPlaying: player.isPlaying
+                        )
                         VStack(spacing: 4) {
                             Text(player.currentSong?.title ?? "Not Playing")
                                 .font(.title2.bold())
@@ -331,7 +324,7 @@ struct ExpandedPlayerView: View {
                         NextMixChip()
                         Spacer(minLength: 0)
                     }
-                    .frame(width: split ? geometry.size.width * 0.44 : geometry.size.width)
+                    .frame(width: columnWidth)
                     .padding(.vertical, 30)
 
                     if split {

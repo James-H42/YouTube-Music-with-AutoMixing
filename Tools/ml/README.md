@@ -1,24 +1,26 @@
 # AutoMix beat model tools
 
 AutoMix finds beats and bar lines with **Beat This!** (F. Foscarin, J. Schlüter, G. Widmer,
-"Beat This! Accurate beat tracking without DBN postprocessing", ISMIR 2024; code and weights
+"Beat This! Accurate beat tracking without DBN postprocessing", ISMIR 2024,
+doi:10.5281/zenodo.14877491; code and weights
 MIT, © 2024 Institute of Computational Perception, JKU Linz; https://github.com/CPJKU/beat_this,
 commit `b95c8ab`). The app runs the small checkpoint (`small0`, 2.1 M parameters, about 10 MB)
 through Core ML from `Models/BeatThis.mlpackage`. Without the model it uses its built-in tracker.
 
 What the model decides today (`TrackAnalyzer.analyze`): only the beat length, where the built-in
 tracker counted a pulse two-thirds or three-halves as long as the model's. The tracker then
-follows the onsets again at the model's beat length. Measured on 2026-11-21:
+follows the onsets again at the model's beat length. Measured again on 2026-11-22 with the
+current build, every song analysed from scratch for each role (outputs in
+`data/audit-results/2026-11-22/{none,ship,grid}`):
 
-| Model's role | Beat F vs reference | Mixes (200 style pairs, 242 history pairs, 10 approved) |
+| Model's role | Beat F (downbeat F) vs reference | Mixes (200 style pairs, 242 history pairs, 10 approved) |
 |---|---|---|
-| none (built-in tracker) | 0.796 | baseline |
-| replaces the grid (beats and bar lines) | 0.952 | 6 approved plans changed, fades 24 → 32 %, owner placement 20 → 11 of 21* |
-| corrects pulse, octave and bar phase | 0.932 | history fades 12 → 24 %, owner placement 20 → 16 of 21* |
+| none (built-in tracker) | 0.796 (0.431) | style fades 28 %, history fades 19 % |
+| corrects 2:3 pulse errors only (shipped) | 0.814 (0.439); vocaloid 0.668 → 0.724, tempo right 46 → 56 % | approved identical to none; style fades 26 %, history fades 19 % |
+| replaces the grid (beats and bar lines, `METROLIST_BEATGRIDS=data/small0-all`) | 0.953 (0.899) | 9 of 10 approved plans changed; style fades 37 %, history fades 27 % |
 
-\* "Owner placement" compared plans with 21 saved transitions that the owner said on 2026-11-21 came
-from accidental clicks. Disregard it; the other measures stand.
-| corrects 2:3 pulse errors only (shipped) | 0.814 (vocaloid 0.67 → 0.72) | approved identical; groups unchanged except one electronic pair |
+A fourth role, correcting pulse, octave and bar phase, scored 0.932 on 2026-11-21 and doubled the
+history fades; its code is no longer in the branch, so it was not measured again.
 
 The planner was tuned on the built-in grids (unbroken, four-beat bars), so more accurate grids
 alone did not give better mixes; the next step is adapting the planner's steadiness and bar
@@ -57,8 +59,8 @@ github.com, and the checkpoints download from cloud.cp.jku.at on first use.
    - fp32 is used: fp16 converts and matches, but ran 5× slower on the tested Mac.
 5. **Check the app matches Python.** `.venv/bin/python silver.py data/wav-parity data/small0 --checkpoint small0`,
    then in the root `METROLIST_HOME=… .build/release/Metrolist --beatmodeltest Tools/ml/data/small0`
-   (PASS needs beat and bar-line F ≥ 0.99 at ±25 ms; it was 1.000 on six songs, about 3 s per
-   four-minute song).
+   (PASS needs beat and bar-line F ≥ 0.99 at ±25 ms; on 2026-11-22 it was 1.000 on six songs,
+   3.3 to 4.7 s per song of 3.5 to 5.3 minutes).
 6. **Measure AutoMix.** `Tools/run_audits.sh BINARY METROLIST_HOME OUT_DIR` runs the analysis
    audit and every mix audit (approved pairs, style groups, common
    mixes, history pairs). Compare a run with the model against one with `METROLIST_BEATMODEL=off`.
@@ -93,7 +95,7 @@ sandbox):
   network only; Swift does the STFT and its inverse. Use fp32: `--fp16` converts but gives wrong
   stems (SDR around 0 dB against PyTorch).
 - `check_stems.py DIR` compares `Metrolist --stemtest` output with PyTorch (PASS at 40 dB;
-  measured 115–122 dB).
+  measured 112.0–126.1 dB on 2026-11-22).
 - `stems_probe.py OUT --homes … --pairs …` stores per-beat stem levels and vocal segments.
   `vocal_check.py` compares the planner's vocal guess with them.
 
