@@ -223,7 +223,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--restore"), CommandLine.arg
 if let flag = CommandLine.arguments.firstIndex(of: "--inspect"), CommandLine.arguments.count > flag + 1 {
     do {
         let info = try LibraryBackup.inspect(URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
-        print("Metrolist backup, format \(info.manifest.formatVersion), made \(info.manifest.createdAt): \(info.files.count) files")
+        print("Metrolist+ backup, format \(info.manifest.formatVersion), made \(info.manifest.createdAt): \(info.files.count) files")
     } catch { print("REJECTED:", error.localizedDescription); exit(1) }
     exit(0)
 }

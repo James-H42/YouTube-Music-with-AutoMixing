@@ -5,7 +5,7 @@ README uses.
 
 ## Papers
 
-- [`paper/automix-paper.pdf`](paper/automix-paper.pdf) describes AutoMix version 2: its design,
+- [`paper/automix-paper.pdf`](paper/automix-paper.pdf) describes AutoMix version 2.0: its design,
   how its parts work together, how it was tested, what was measured and what it can't yet do.
   The LaTeX source is `paper/automix-paper.tex`. `paper/FACTS.md` lists the source in the code or
   the measurement run behind each fact the paper states.

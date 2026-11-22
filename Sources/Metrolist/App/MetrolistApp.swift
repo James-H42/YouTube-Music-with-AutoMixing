@@ -39,7 +39,7 @@ struct MetrolistApp: App {
     @ViewState private var model = AppModel.shared
 
     var body: some Scene {
-        Window("Metrolist", id: "main") {
+        Window("Metrolist+", id: "main") {
             RootView()
                 .environment(model)
                 .frame(minWidth: 700, minHeight: 480)
@@ -88,7 +88,7 @@ struct MetrolistApp: App {
                 .environment(model)
         } label: {
             Image(systemName: model.player.isPlaying ? "music.note" : "music.note")
-                .accessibilityLabel("Metrolist")
+                .accessibilityLabel("Metrolist+")
         }
         .menuBarExtraStyle(.window)
     }

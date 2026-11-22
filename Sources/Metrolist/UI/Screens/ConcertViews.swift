@@ -24,7 +24,7 @@ struct ConcertsView: View {
                     ContentUnavailableView {
                         Label("Choose Where to Look", systemImage: "mappin.and.ellipse")
                     } description: {
-                        Text("Type a city, region or country to see concerts from the artists you follow and listen to. Metrolist never reads your Mac's location.")
+                        Text("Type a city, region or country to see concerts from the artists you follow and listen to. Metrolist+ never reads your Mac's location.")
                     } actions: {
                         Button("Choose a Location…") { choosingPlace = true }
                             .buttonStyle(.glassProminent)
@@ -317,7 +317,7 @@ struct ConcertDetailView: View {
                     details(concert)
                     lineUp(concert)
                     Text(concert.source == "ticketmaster"
-                         ? "Listing from Ticketmaster. Tickets are sold by \(concert.ticketSeller ?? "Ticketmaster"), not by Metrolist."
+                         ? "Listing from Ticketmaster. Tickets are sold by \(concert.ticketSeller ?? "Ticketmaster"), not by Metrolist+."
                          : "Listing from MusicBrainz, entered by its volunteers. Check the date with the venue before you travel.")
                         .font(.caption).foregroundStyle(.secondary)
                         .padding(.horizontal, 24)
@@ -711,7 +711,7 @@ enum ConcertCalendar {
         }
         let stamp = Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day().dateTimeSeparator(.standard).time(includingFractionalSeconds: false)
         func utc(_ date: Date) -> String { date.formatted(stamp).replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "") + "Z" }
-        var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Metrolist//Concerts//EN", "BEGIN:VEVENT",
+        var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Metrolist+//Concerts//EN", "BEGIN:VEVENT",
                      "UID:\(concert.id)@metrolist", "DTSTAMP:\(utc(Date()))", "SUMMARY:\(escape(concert.name))",
                      "LOCATION:\(escape([concert.venue.name, concert.venue.address ?? concert.venue.place].filter { !$0.isEmpty }.joined(separator: ", ")))"]
         if concert.localTime != nil {

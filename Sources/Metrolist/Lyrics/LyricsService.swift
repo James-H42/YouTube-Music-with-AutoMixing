@@ -297,7 +297,7 @@ actor LyricsService {
     }
 
     private func lrcLibResults(title: String, artist: String, duration: Int) async -> [Lyrics] {
-        let headers = ["User-Agent": "Metrolist for macOS (https://github.com/MetrolistGroup/Metrolist)"]
+        let headers = ["User-Agent": "Metrolist+ for macOS (https://github.com/MetrolistGroup/Metrolist)"]
         guard let data = await get("https://lrclib.net/api/search", ["track_name": title, "artist_name": artist], headers: headers) else { return [] }
         return JSON(data: data).array.prefix(6).compactMap { record -> Lyrics? in
             if duration > 0, let length = record["duration"].double, abs(length - Double(duration)) > 5 { return nil }
@@ -337,7 +337,7 @@ actor LyricsService {
     }
 
     private func lrcLib(title: String, artist: String, album: String?, duration: Int) async -> Lyrics? {
-        let headers = ["User-Agent": "Metrolist for macOS (https://github.com/MetrolistGroup/Metrolist)"]
+        let headers = ["User-Agent": "Metrolist+ for macOS (https://github.com/MetrolistGroup/Metrolist)"]
         var record = JSON(nil)
         if duration > 0, let data = await get(
             "https://lrclib.net/api/get",

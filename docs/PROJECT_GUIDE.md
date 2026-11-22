@@ -17,7 +17,7 @@ phone), a shared queue for guests on the local network, a music-video player, bi
 output and Concerts.
 
 One Swift package, one executable target (`Sources/Metrolist`), no third-party dependencies.
-Swift 6.2 tools, Swift 5 language mode. About 36,000 lines.
+Swift 6.2 tools, Swift 5 language mode. About 37,000 lines. The app is named Metrolist+.
 
 ## Working rules from the owner
 
@@ -56,10 +56,16 @@ Swift 6.2 tools, Swift 5 language mode. About 36,000 lines.
 ## Build, run and test
 
 - `swift build` builds `.build/debug/Metrolist`.
-- `Scripts/make-dist.sh` builds the release app the owner tests, `dist/Metrolist.app`, plus
-  `dist/Metrolist.zip`. It bundles `Models/` (both models, about 216 MB) and keeps the previous
-  app as `dist/.Metrolist-previous-<time>.app`. `build/Metrolist.app` (from
-  `Scripts/make-app.sh`) is usually stale. Rebuild `dist/` after changes the owner will try.
+- `Scripts/make-dist.sh` builds the release app the owner tests, `dist/Metrolist+.app`, plus
+  `dist/Metrolist+.zip`. It bundles `Models/` (both models, about 216 MB) and keeps the previous
+  app as `dist/.Metrolist+-previous-<time>.app`. `build/Metrolist+.app` (from
+  `Scripts/make-app.sh`) is usually stale.
+- **The app's name is Metrolist+** (since 2026-11-22): the bundle, its executable, the menu bar,
+  window and UI text. These keep the old name on purpose, because data and other apps depend on
+  them: the bundle identifier `app.metrolist.mac.automix` (preferences), the data folder
+  `~/Library/Application Support/Metrolist`, keychain services `Metrolist*`, the backup format's
+  `appName` ("Metrolist", which restores check), the Swift target and `.build/*/Metrolist`, the
+  Bonjour type `_metrolist-connect._tcp`, and every reference to the Android app Metrolist. Rebuild `dist/` after changes the owner will try.
 - **Sandboxed agent sessions:** `swift build` and running the binary need the Bash sandbox off.
   The build service can't write `.build` inside it, and the app's networking ignores the sandbox
   proxy (everything reports offline).
@@ -69,13 +75,15 @@ Swift 6.2 tools, Swift 5 language mode. About 36,000 lines.
   packaged app writes into the owner's own preferences: tests switch Autoplay off, and on
   2026-11-21 the owner's Autoplay was found off. The real data is in `~/Library/Application Support/Metrolist`. For offline test
   songs, copy `Media/*.webm`, `media.json`, `Lyrics/` and `library.json` from there into the
-  test home. The AutoMix suites expect `METROLIST_HOME=/tmp/claude/mixhome`.
+  test home. The AutoMix suites run on an APFS clone of `Tools/ml/data/libraries/mg-audit-after`
+  (git-ignored; on 2026-11-22 `--featuretest`, `--playnexttest` and `--videomixtest` gave their
+  usual results on it). `/tmp` is emptied on restart, so keep nothing there.
 - **Settings still written to `UserDefaults.standard`** (`OutputDevices`, `ConcertStore`,
   `BlockedContent`, `Scrobbler`, `LyricsService`, Device Connect and a few others) go to the
   running binary's own domain whatever `METROLIST_HOME` says: `app.metrolist.mac.automix` for
   the packaged app, `~/Library/Preferences/Metrolist.plist` for `.build/*/Metrolist` (a binary
   without a bundle takes its file name as the domain). So never run tests from
-  `dist/Metrolist.app/Contents/MacOS/Metrolist`, and to keep `Metrolist.plist` untouched too,
+  `dist/Metrolist+.app/Contents/MacOS/Metrolist+`, and to keep `Metrolist.plist` untouched too,
   run a copy of the binary under another name (the merge checks used `Metrolist-merge`, with
   `METROLIST_MODELS=<repo>/Models`).
 - **Keychain:** a run with `METROLIST_HOME` set (or `METROLIST_TEST_KEYCHAIN=1`) uses a
@@ -84,7 +92,7 @@ Swift 6.2 tools, Swift 5 language mode. About 36,000 lines.
   owner away overnight) must never get one. Set both anyway.
 - **Parallel agents:** another agent may be using the main checkout and the `/tmp/claude`
   homes. Work in a worktree (see the owner's memory note) and on APFS clones of test homes
-  (`cp -cR /tmp/claude/mixhome /tmp/claude/<yours>`).
+  (`cp -cR Tools/ml/data/libraries/mg-audit-after /tmp/claude/<yours>`).
 - `swift build` sometimes reports success in about 3 s without recompiling a file that was just
   edited. If a change seems missing, touch the file and build again.
 - Offscreen captures (`--snapshot`, `--albumshot`, `METROLIST_VIDEOSHOT`) don't draw Liquid
@@ -324,13 +332,19 @@ why it works the way it does:
 - `docs/automix-progress.md` (git-ignored, copied by hand): the session-by-session log of the
   AutoMix redevelopment, with every measurement.
 - `docs/Metrolist AutoMix and Queueing - Technical Paper.pdf` (in git).
-- `Tools/ml/data/` (git-ignored, 4.3 GB, cloned from the AutoMix worktree): audit results
-  (`audit-results/final2` and earlier), the gate's training sets, reference resolutions, test
-  audio and model checkpoints.
-- Still only in `.claude/worktrees/automix-all-styles`: the Python environments
-  (`Tools/ml/.venv`, `.venv-convert`, `.venv-stems`; remake them from
-  `Tools/ml/requirements*.txt`) and the backup of the AutoMix system before the 2026-11-21
-  redevelopment (`.source-backup-automix-2026-11-21/`).
+- `Tools/ml/data/` (git-ignored, 4.3 GB plus the test libraries): audit results
+  (`audit-results/2026-11-22`, `final2` and earlier), the gate's training sets, reference
+  resolutions, test audio and model checkpoints. `Tools/ml/data/libraries/` holds the test
+  libraries the measurements use: `refhome-a`, `-b`, `-c` (reference songs), `mg-audit-after`
+  (the 198 style-group songs, common and history pairs) and `stemhome`.
+- Also git-ignored in the main folder (moved there from the worktrees on 2026-11-22): the Python
+  environments `Tools/ml/.venv`, `.venv-convert` and `.venv-stems` (they work when run as
+  `.venv/bin/python`; use `.venv/bin/python -m pip` rather than `pip`, whose script still names
+  the old path; or remake them from `Tools/ml/requirements*.txt`), the backup of the AutoMix
+  system before the 2026-11-21 redevelopment (`.source-backup-automix-2026-11-21/`), and
+  `.source-backup-worktrees-2026-11-22/` (the merge's commit message and pull-request draft, and
+  the measurement scripts of 2026-11-22). `Models/HTDemucs.mlpackage` is in place, so stems work
+  in builds from the main folder.
 
 ### UI (`UI/`)
 
@@ -501,10 +515,10 @@ the merged app).** Working note: `docs/OVERNIGHT_2026-11-21_PROGRESS.md` (git-ig
   after a transition was cued lost it, and the next song followed after a gap
   (`MixEngine.seek` drops the cue; the player never re-cued). `PlayerController.seek` now
   resets `gaplessKey`.
-- **New technical paper** on AutoMix version 2: `docs/paper/automix-paper.pdf` (source
+- **New technical paper** on AutoMix version 2.0: `docs/paper/automix-paper.pdf` (source
   `automix-paper.tex`, IEEEtran, built with `tectonic -X compile`; sources of every fact in
-  `docs/paper/FACTS.md`, git-ignored). The 14 November 2026 paper stays in `docs/` as the record
-  of version 1.
+  `docs/paper/FACTS.md`, in git). The 14 November 2026 paper stays in `docs/` as the record
+  of version 1.0.
 - **README rewritten** as the GitHub page, with screenshots from the running app
   (`docs/images/`, made by `METROLIST_WINDOWTEST_SHOWCASE` in a home holding only two songs).
 - Checks: `--featuretest` 47/47, `--radiotest` 14/14, `--playnexttest`/`--videomixtest` only
@@ -547,7 +561,8 @@ the merged app).** Working note: `docs/OVERNIGHT_2026-11-21_PROGRESS.md` (git-ig
 system before it in `.source-backup-automix-2026-11-21/` in the AutoMix worktree).** Details
 are in `docs/AUTOMIX_REFERENCE_MIXES.md` and `docs/automix-progress.md`.
 - **Reference sets:** Spotify "Mixed By" playlists, DJ-mixed albums, MixesDB DJ histories and
-  curated sample pairs. Songs were fetched into `/tmp/claude/refhome-{a,b,c}`.
+  curated sample pairs. Songs were fetched into `refhome-{a,b,c}`, now in
+  `Tools/ml/data/libraries/`.
 - **Learned sample gate, "Tempo match" and tempo ramps.** Against the 05:50 build:
   - Approved plans are identical.
   - Owner placement was unchanged at 19/20/21 of 21, but that measure used the custom
@@ -595,9 +610,10 @@ Design notes for earlier work are in the main checkout's `docs/` (git-ignored, n
 ## Open items
 
 Waiting on the owner:
-- Commit branch `claude/merge-2026-11-21` onto `dev` and open the pull request into `main` (the
-  owner's plan, 2026-11-22). See Status 2026-11-22 for the untracked guide in the main checkout
-  and the stray `albums` file.
+- Push `dev`: on 2026-11-22 it was fast-forwarded locally to `main` (which holds the merged
+  branch and the owner's README edits) and is 4 commits ahead of `origin/dev`. The branches
+  `claude/automix-all-styles`, `claude/session-2026-11-21` and `claude/merge-2026-11-21` and
+  their worktrees were removed after their local-only files were moved into the main folder.
 - A look at Settings › Playback with bit-perfect output and AutoMix both on: it should show
   AutoMix paused (the playback side was checked live on 2026-11-21).
 - In the real app: a music video in macOS full screen (no band at the top while the controls

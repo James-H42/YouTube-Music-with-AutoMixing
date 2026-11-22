@@ -83,7 +83,7 @@ final class LimiterAU: AUAudioUnit {
     )
 
     static let registered: Void = {
-        AUAudioUnit.registerSubclass(LimiterAU.self, as: description, name: "Metrolist: Limiter", version: 1)
+        AUAudioUnit.registerSubclass(LimiterAU.self, as: description, name: "Metrolist+: Limiter", version: 1)
     }()
 
     private let state = LimiterState()

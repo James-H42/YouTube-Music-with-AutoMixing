@@ -31,7 +31,7 @@ and adds bit-perfect output, synced lyrics and a music-video player, in SwiftUI 
 
 This is a complete YouTube Music app for the Mac, written from scratch in Swift. It follows the
 design of the Android client [Metrolist](https://github.com/MetrolistGroup/Metrolist), so the
-application is currently named Metrolist on macOS. It is one Swift package and uses only
+application is named Metrolist+ on macOS. It is one Swift package and uses only
 Apple's frameworks, with no third-party dependencies.
 
 Its main feature is AutoMix. Instead of a crossfade, AutoMix plans a transition for every pair of
@@ -262,10 +262,10 @@ change, a set of transitions approved by ear must plan byte-for-byte the same. T
 git clone <this repository>
 cd YT-Music-with-AutoMix
 
-Scripts/make-app.sh                 # builds build/Metrolist.app
-open build/Metrolist.app
+Scripts/make-app.sh                 # builds build/Metrolist+.app
+open build/Metrolist+.app
 
-Scripts/make-dist.sh [version]      # release: dist/Metrolist.app and dist/Metrolist.zip
+Scripts/make-dist.sh [version]      # release: dist/Metrolist+.app and dist/Metrolist+.zip
 ```
 
 Release builds are ad-hoc signed and not notarised. macOS asks you to allow the app in System
@@ -669,7 +669,7 @@ uses the cookies only for requests to YouTube. It keeps the Last.fm and ListenBr
 Ticketmaster key and the Device Connect pairing keys in the macOS Keychain, never in files or
 backups. Never commit any of these, and never share your data folder,
 `~/Library/Application Support/Metrolist`, which also holds your library, your listening history and
-cached audio.
+cached audio. The folder keeps that name under Metrolist+, so an existing library carries over.
 
 **Online lookups.** If "Look up known samples online" is on, the app sends the title and artist of
 the playing and next songs to musicbrainz.org, and to Genius if you add a token. You can switch this
@@ -737,8 +737,8 @@ GPL requires.
   2000, pp. 452 to 455. [doi:10.1109/ICME.2000.869637](https://doi.org/10.1109/ICME.2000.869637).
   The track analysis uses it to find section boundaries.
 
-The technical paper on the current AutoMix is
-[`docs/paper/automix-paper.pdf`](docs/paper/automix-paper.pdf). The paper on its first version, from
+The technical paper on AutoMix version 2.0, the current version, is
+[`docs/paper/automix-paper.pdf`](docs/paper/automix-paper.pdf). The paper on version 1.0, from
 14 November 2026, stays in `docs/` as a record.
 
 ## License
