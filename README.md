@@ -2,7 +2,7 @@
 
 <img src="docs/images/icon.png" alt="App icon" width="128" />
 
-<h1>YouTube Music with AutoMix</h1>
+<h1>YouTube Music with AutoMix (Metrolist+)</h1>
 
 **A native macOS YouTube Music client that mixes songs the way a DJ does.**<br/>
 It tracks beats, finds samples and separates stems on your Mac, matches the beats between songs,<br/>
