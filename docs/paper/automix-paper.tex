@@ -31,15 +31,15 @@
 
 \author{\IEEEauthorblockN{Claude Opus 5.5}
 \IEEEauthorblockA{Anthropic, model \code{claude-opus-5-5}, with extended thinking at the xhigh effort level, in Claude Code\\
-Technical report on AutoMix version 2 for the YouTube Music with AutoMix project, named Metrolist on the Mac.\\
-It describes branch \code{claude/merge-2026-11-21} as of 22 November 2026 and replaces the report of 14 November 2026.}}
+Technical report on AutoMix version 2.0 for the YouTube Music with AutoMix project, named Metrolist+ on the Mac.\\
+It describes the code merged into \code{main} on 22 November 2026 and replaces the report on version 1.0.}}
 
 \maketitle
 
 \begin{abstract}
 AutoMix is the transition system of a native macOS client for YouTube Music. Instead of a fixed
 cross-fade, it plans a transition for every pair of consecutive songs and performs it on a
-two-deck audio engine, all on the listener's computer. This report describes the second version of
+two-deck audio engine, all on the listener's computer. This report describes version 2.0 of
 the system. The app analyses each song once for tempo, beats, bars, key, harmony, tone colour and
 sections. A small neural beat tracker runs through Core ML and corrects one class of tempo error,
 a pulse counted at two-thirds or three-halves of the real beat. A planner proposes and ranks four
@@ -90,7 +90,7 @@ to a sample database.
 the reason the planner chose it, and the listener can change it.
 \end{itemize}
 
-A report on 14 November 2026 described the first version. Since then the analysis has gained a
+A report on 14 November 2026 described version 1.0. Since then the analysis has gained a
 neural beat-error correction. The planner has gained a learned sample gate, tempo ramps and a limit
 on speed changes between unrelated songs. The engine has gained stem separation, and the queue a
 learned ordering model. Section~\ref{sec:background} introduces the musical terms. Sections
@@ -409,7 +409,7 @@ passage. That was tried, and it invented matches.
 
 \subsection{Tempo matches and ramps}
 When the gate rejects a match at another speed, the planner can still offer the move as a \q{Tempo
-match}, ranked below what the same tempo offers. Version~2 limits it. The playing song may change
+match}, ranked below what the same tempo offers. Version~2.0 limits it. The playing song may change
 speed by at most 20\,\% and pitch by at most two semitones. The limit came from listening. One plan
 took MONTERO to 163\,\% of its speed and up seven semitones to meet Body, which it reached only by
 counting Body at double time. The owner heard it and found it unnatural. Planned without the limit
@@ -527,7 +527,7 @@ ends, a song left at another speed or pitch eases back to its own along the curv
 $\max(8,\,150|r-1|,\,6|k|)$ seconds, at most 24. If the next song is not ready at the mix point, the
 engine waits. More than 1.5\,s past the mix point, it abandons the transition and the songs follow
 without a gap. A song loaded before the listener switched AutoMix on cannot change speed, so its
-planned move falls back to a cross-fade of the same length. Since version~2, a seek after the
+planned move falls back to a cross-fade of the same length. Since version~2.0, a seek after the
 engine has cued a transition hands the transition to the engine again. Before, the transition was
 lost and the next song followed after a gap.
 

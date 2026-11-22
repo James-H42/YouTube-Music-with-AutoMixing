@@ -87,7 +87,7 @@ enum WindowTest {
             report("closed again")
             // Metrolist 14.0.1 fixed its Mac app not reopening after being hidden: close the
             // window, then send the event a click on the Dock icon sends.
-            NSApp.windows.first { $0.title == "Metrolist" || $0.identifier?.rawValue.hasPrefix("main") == true }?.close()
+            NSApp.windows.first { $0.title == "Metrolist+" || $0.identifier?.rawValue.hasPrefix("main") == true }?.close()
             try? await Task.sleep(for: .seconds(1))
             print("after closing: main window visible = \(mainVisible)")
             let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
@@ -296,17 +296,17 @@ enum WindowTest {
     }
 
     private static var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true || $0.title == "Metrolist" }
+        NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true || $0.title == "Metrolist+" }
     }
 
     private static var mainVisible: Bool {
-        NSApp.windows.contains { ($0.title == "Metrolist" || $0.identifier?.rawValue.hasPrefix("main") == true) && $0.isVisible }
+        NSApp.windows.contains { ($0.title == "Metrolist+" || $0.identifier?.rawValue.hasPrefix("main") == true) && $0.isVisible }
     }
 
     /// A window button counts as usable when it and every view above it are shown and it
     /// sits inside the window's visible frame.
     private static func report(_ label: String) {
-        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true || $0.title == "Metrolist" }) else {
+        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true || $0.title == "Metrolist+" }) else {
             print("\(label): main window not found")
             return
         }

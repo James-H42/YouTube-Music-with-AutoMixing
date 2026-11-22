@@ -124,13 +124,13 @@ struct SoundSettings: View {
                 // Only the switch is disabled without bit-perfect output: a disabled label would
                 // switch its ⓘ off too, and the explanation is most wanted while it is unavailable.
                 LabeledContent {
-                    Toggle("Keep the output to Metrolist alone", isOn: $settings.exclusiveOutput)
+                    Toggle("Keep the output to Metrolist+ alone", isOn: $settings.exclusiveOutput)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.mini)
                         .disabled(!settings.bitPerfect)
                 } label: {
-                    Text("Keep the output to Metrolist alone")
+                    Text("Keep the output to Metrolist+ alone")
                         .foregroundStyle(settings.bitPerfect ? .primary : .secondary)
                         .info(Explain.exclusive)
                 }
@@ -174,15 +174,15 @@ struct SoundSettings: View {
 
 /// The hover explanations (ⓘ) for the Output settings, in plain words.
 private enum Explain {
-    static let bitPerfect = "Sends the sound to your headphones, speakers or DAC exactly as it was decoded, with nothing in Metrolist changing it. The output is switched to the song's own sample rate, and the equalizer, loudness normalisation and AutoMix pause. The volume slider then controls the device's own volume (the same as the volume keys), so the audio itself is never turned down in the app. Worth turning on with wired headphones or an external DAC; leave it off if you want AutoMix or the equalizer."
-    static let exclusive = "Gives Metrolist sole use of the output while it plays, so no other app, notification or alert sound is mixed in and nothing can change its sample rate. While it is on, macOS sends other apps' sound to another output, such as the built-in speakers. Everything goes back to normal when you turn this or bit-perfect output off, or quit Metrolist. Available while bit-perfect output is on."
+    static let bitPerfect = "Sends the sound to your headphones, speakers or DAC exactly as it was decoded, with nothing in Metrolist+ changing it. The output is switched to the song's own sample rate, and the equalizer, loudness normalisation and AutoMix pause. The volume slider then controls the device's own volume (the same as the volume keys), so the audio itself is never turned down in the app. Worth turning on with wired headphones or an external DAC; leave it off if you want AutoMix or the equalizer."
+    static let exclusive = "Gives Metrolist+ sole use of the output while it plays, so no other app, notification or alert sound is mixed in and nothing can change its sample rate. While it is on, macOS sends other apps' sound to another output, such as the built-in speakers. Everything goes back to normal when you turn this or bit-perfect output off, or quit Metrolist+. Available while bit-perfect output is on."
     static let signalPath = "Every step the sound takes from YouTube's stream to your output, checked once a second. A green tick means that step leaves the audio untouched; an orange warning shows what is changing it."
     static let source = "What YouTube sends: the audio format, its bitrate, sample rate and number of channels. YouTube's audio is compressed (Opus), so bit-perfect output keeps it exactly as decoded rather than making it lossless."
     static let output = "The device the sound is playing through, the sample rate it is running at and the bit depth it is fed."
     static let sampleRate = "\u{201C}Matched\u{201D} means the output runs at the song's own rate, so macOS doesn't have to convert (resample) the audio. \u{201C}Resampled\u{201D} means the device can't run at that rate and the audio is converted on the way."
-    static let processing = "Anything in Metrolist that changes the sound: the equalizer, the limiter, loudness normalisation or AutoMix. For bit-perfect output this should say None."
+    static let processing = "Anything in Metrolist+ that changes the sound: the equalizer, the limiter, loudness normalisation or AutoMix. For bit-perfect output this should say None."
     static let volume = "Where the volume is set. Turning the volume down inside the app scales every sample, which is no longer bit-perfect. With bit-perfect output the app stays at full level and the slider sets the device's own volume instead."
-    static let exclusiveRow = "Whether other apps can play through the same output at the same time. Turn on \u{201C}Keep the output to Metrolist alone\u{201D} to keep them out."
+    static let exclusiveRow = "Whether other apps can play through the same output at the same time. Turn on \u{201C}Keep the output to Metrolist+ alone\u{201D} to keep them out."
     static let wireless = "Bluetooth and AirPlay compress the audio again to send it over the air, so no wireless output can be bit-perfect. Use a wired output or a USB DAC for that."
 }
 
@@ -264,7 +264,7 @@ struct SignalPathView: View {
     private func exclusive(_ state: BitPerfectOutput.Report.Exclusive) -> String {
         switch state {
         case .off: "Shared with other apps"
-        case .held: "Metrolist only"
+        case .held: "Metrolist+ only"
         case .refused(let pid): "Held by another app (\(NSRunningApplication(processIdentifier: pid)?.localizedName ?? "process \(pid)"))"
         }
     }
@@ -410,7 +410,7 @@ struct IntegrationsSettings: View {
                             Task { if let url = await scrobbler.beginLastFmSignIn() { NSWorkspace.shared.open(url) } }
                         }
                     } else {
-                        Text("Approve Metrolist in your browser, then come back and press Finish.").font(.callout)
+                        Text("Approve Metrolist+ in your browser, then come back and press Finish.").font(.callout)
                         Button("Finish Signing In") { Task { await scrobbler.finishLastFmSignIn() } }
                     }
                 }
@@ -543,7 +543,7 @@ private struct AccountSettings: View {
                         .disabled(model.account.isSyncing)
                 }
                 Toggle("Play through my account when YouTube blocks anonymous playback", isOn: Bindable(model.settings).accountPlayback)
-                Text("Normally songs are streamed anonymously and your account is only used for your library and history. If YouTube asks this connection to prove it isn't a bot, Metrolist can ask for the stream as you instead. That is the only thing that works on a blocked connection, but it ties the playback requests to your account.")
+                Text("Normally songs are streamed anonymously and your account is only used for your library and history. If YouTube asks this connection to prove it isn't a bot, Metrolist+ can ask for the stream as you instead. That is the only thing that works on a blocked connection, but it ties the playback requests to your account.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {

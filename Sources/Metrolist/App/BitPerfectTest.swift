@@ -213,7 +213,7 @@ enum BitPerfectTest {
         }
         let owner = AudioDeviceControl.hogOwner(device) ?? -1
         if originalOwner == -1 {
-            check("live: Metrolist holds the output alone", owner == getpid(), "owner \(owner), this process \(getpid())")
+            check("live: Metrolist+ holds the output alone", owner == getpid(), "owner \(owner), this process \(getpid())")
         } else {
             print("  (another process \(originalOwner) already held the output; exclusive access not tested)")
         }
@@ -271,7 +271,7 @@ enum BitPerfectTest {
             await wait(2)
             check("live: and keeps playing", engine.currentTime - before > 1.5, String(format: "%.2f s → %.2f s", before, engine.currentTime))
             if originalOwner == -1 {
-                check("live: Metrolist holds \(name) alone", AudioDeviceControl.hogOwner(device) == getpid(), "owner \(AudioDeviceControl.hogOwner(device) ?? -1)")
+                check("live: Metrolist+ holds \(name) alone", AudioDeviceControl.hogOwner(device) == getpid(), "owner \(AudioDeviceControl.hogOwner(device) ?? -1)")
             }
             engine.stop()
         }

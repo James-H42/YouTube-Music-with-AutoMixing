@@ -140,7 +140,7 @@ struct ListenBrainz: ScrobbleService {
     }
 
     private func metadata(_ listen: Listen) -> [String: Any] {
-        var info: [String: Any] = ["media_player": "Metrolist for macOS", "submission_client": "Metrolist for macOS", "music_service": "music.youtube.com",
+        var info: [String: Any] = ["media_player": "Metrolist+ for macOS", "submission_client": "Metrolist+ for macOS", "music_service": "music.youtube.com",
                                     "origin_url": "https://music.youtube.com/watch?v=\(listen.videoId)"]
         if let duration = listen.duration, duration > 0 { info["duration_ms"] = duration * 1000 }
         var track: [String: Any] = ["artist_name": listen.artist, "track_name": listen.title, "additional_info": info]

@@ -10,7 +10,7 @@ enum YTError: LocalizedError {
     /// YouTube refused every playback identity with its "confirm you're not a bot" check.
     case botCheck
 
-    static let botCheckMessage = "YouTube is asking this connection to prove it isn't a bot, so new songs can't be streamed right now. Downloaded and cached songs still play. This usually clears by itself; turning a VPN off or changing network often fixes it straight away. Signing in (Settings) lets Metrolist play through your account instead."
+    static let botCheckMessage = "YouTube is asking this connection to prove it isn't a bot, so new songs can't be streamed right now. Downloaded and cached songs still play. This usually clears by itself; turning a VPN off or changing network often fixes it straight away. Signing in (Settings) lets Metrolist+ play through your account instead."
 
     var errorDescription: String? {
         switch self {

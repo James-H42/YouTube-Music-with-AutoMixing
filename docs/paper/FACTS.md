@@ -1,4 +1,4 @@
-# Verified facts for the AutoMix paper (branch claude/merge-2026-11-21, 2026-11-22)
+# Verified facts for the AutoMix version 2.0 paper (code merged into main, 2026-11-22)
 
 Each line: fact, then its source (file:line, a document, or a measurement run). Only facts listed
 here go into the paper, the README's AutoMix sections and the social-media drafts.

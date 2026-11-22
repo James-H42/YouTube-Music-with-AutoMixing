@@ -35,7 +35,7 @@ struct MiniPlayerView: View {
                             }
                             .buttonStyle(IconButtonStyle())
                             .glassEffect(.regular.interactive(), in: .circle)
-                            .help("Return to Metrolist")
+                            .help("Return to Metrolist+")
 
                             Spacer()
 
@@ -139,7 +139,7 @@ struct MenuBarPlayerView: View {
                     Text(player.currentSong?.title ?? "Not Playing")
                         .font(.headline)
                         .lineLimit(2)
-                    Text(player.currentSong?.artistText ?? "Open Metrolist to choose music")
+                    Text(player.currentSong?.artistText ?? "Open Metrolist+ to choose music")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -162,7 +162,7 @@ struct MenuBarPlayerView: View {
 
             Divider()
             HStack {
-                Button("Open Metrolist") {
+                Button("Open Metrolist+") {
                     dismissWindow(id: "mini")
                     openWindow(id: "main")
                     NSApp.activate()

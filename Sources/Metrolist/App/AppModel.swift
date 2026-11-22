@@ -201,7 +201,7 @@ final class AppModel {
         }
         do {
             let songs = library.songs(playlist.songIds)
-            let id = try await YTMusic.createPlaylist(title: playlist.name, description: "Imported with Metrolist", videoIds: playlist.songIds)
+            let id = try await YTMusic.createPlaylist(title: playlist.name, description: "Imported with Metrolist+", videoIds: playlist.songIds)
             library.link(playlistId, toRemote: PlaylistItem(id: id, title: playlist.name, author: account.account?.name, thumbnail: songs.first?.thumbnail))
             return true
         } catch {
@@ -348,7 +348,7 @@ final class AppModel {
     func backUpLibrary() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.zip]
-        panel.nameFieldStringValue = "Metrolist Backup \(Date().formatted(.iso8601.year().month().day())).zip"
+        panel.nameFieldStringValue = "Metrolist+ Backup \(Date().formatted(.iso8601.year().month().day())).zip"
         panel.message = "Saves your library, saved transitions, sample links, equalizer profiles, edited lyrics and preferences. Sign-ins, tokens and downloaded songs are not included."
         let accessory = NSButton(checkboxWithTitle: "Include song analysis (larger, saves re-analysing)", target: nil, action: nil)
         panel.accessoryView = accessory
@@ -366,13 +366,13 @@ final class AppModel {
     func restoreLibrary() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.zip]
-        panel.message = "Choose a Metrolist backup"
+        panel.message = "Choose a Metrolist+ backup"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let info = try LibraryBackup.inspect(url)
             let confirm = NSAlert()
             confirm.messageText = "Restore this backup?"
-            confirm.informativeText = "Made \(info.manifest.createdAt.formatted(date: .abbreviated, time: .shortened)), with \(info.files.count) items. It replaces your library, saved transitions, equalizer profiles, edited lyrics and preferences. A copy of what is there now is kept in Metrolist's Backups folder."
+            confirm.informativeText = "Made \(info.manifest.createdAt.formatted(date: .abbreviated, time: .shortened)), with \(info.files.count) items. It replaces your library, saved transitions, equalizer profiles, edited lyrics and preferences. A copy of what is there now is kept in Metrolist+'s Backups folder."
             confirm.addButton(withTitle: "Restore")
             confirm.addButton(withTitle: "Cancel")
             guard confirm.runModal() == .alertFirstButtonReturn else { return }
@@ -382,7 +382,7 @@ final class AppModel {
             player.reloadSavedMixes()
             MasterEQ.shared.reload()
             BlockedContent.shared.reload()
-            tell("Backup restored", "\(result.files) items were restored. Restart Metrolist so that the preferences take effect. What was replaced is in Backups/\(result.replacedCopy?.lastPathComponent ?? "").")
+            tell("Backup restored", "\(result.files) items were restored. Restart Metrolist+ so that the preferences take effect. What was replaced is in Backups/\(result.replacedCopy?.lastPathComponent ?? "").")
         } catch {
             tell("Nothing was restored", error.localizedDescription, style: .warning)
         }

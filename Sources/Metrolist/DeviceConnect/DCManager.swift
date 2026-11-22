@@ -108,7 +108,7 @@ final class DeviceConnect {
         keychainStore = store == nil ? keychain : nil
         self.store = store ?? keychain
         enabled = mode == .owner && UserDefaults.standard.bool(forKey: "deviceConnectEnabled")
-        deviceName = UserDefaults.standard.string(forKey: "deviceConnectName") ?? "Metrolist (Mac)"
+        deviceName = UserDefaults.standard.string(forKey: "deviceConnectName") ?? "Metrolist+ (Mac)"
         useAccount = mode == .owner && UserDefaults.standard.bool(forKey: "deviceConnectUseAccount")
         accountIdKnown = UserDefaults.standard.string(forKey: "deviceConnectDataSyncId") != nil
         refreshPaired()
@@ -126,7 +126,7 @@ final class DeviceConnect {
 
     /// The name phones show for this endpoint.
     var advertisedName: String {
-        let base = dcSanitizeDeviceName(DeviceConnect.shared.deviceName).isEmpty ? "Metrolist (Mac)" : dcSanitizeDeviceName(DeviceConnect.shared.deviceName)
+        let base = dcSanitizeDeviceName(DeviceConnect.shared.deviceName).isEmpty ? "Metrolist+ (Mac)" : dcSanitizeDeviceName(DeviceConnect.shared.deviceName)
         return mode == .owner ? base : dcSanitizeDeviceName(String(base.prefix(48)) + " · Shared queue")
     }
 

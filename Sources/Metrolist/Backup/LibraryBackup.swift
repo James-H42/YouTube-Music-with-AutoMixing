@@ -110,8 +110,8 @@ enum LibraryBackup {
 
         var errorDescription: String? {
             switch self {
-            case .notABackup: "That isn't a Metrolist backup."
-            case .newerFormat: "That backup was made by a newer version of Metrolist."
+            case .notABackup: "That isn't a Metrolist+ backup."
+            case .newerFormat: "That backup was made by a newer version of Metrolist+."
             case .invalidContent(let name): "The backup's \(name) isn't valid, so nothing was restored."
             }
         }
