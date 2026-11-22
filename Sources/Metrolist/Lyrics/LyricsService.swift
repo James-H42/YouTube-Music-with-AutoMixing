@@ -7,7 +7,7 @@ enum LyricsSource: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .betterLyrics: "BetterLyrics"
+        case .betterLyrics: "Better Lyrics"
         case .lrcLib: "LRCLIB"
         case .simpMusic: "SimpMusic"
         case .lrcRed: "lrc.red"
@@ -297,7 +297,7 @@ actor LyricsService {
     }
 
     private func lrcLibResults(title: String, artist: String, duration: Int) async -> [Lyrics] {
-        let headers = ["User-Agent": "Metrolist+ for macOS (https://github.com/MetrolistGroup/Metrolist)"]
+        let headers = ["User-Agent": AppIdentity.userAgent]
         guard let data = await get("https://lrclib.net/api/search", ["track_name": title, "artist_name": artist], headers: headers) else { return [] }
         return JSON(data: data).array.prefix(6).compactMap { record -> Lyrics? in
             if duration > 0, let length = record["duration"].double, abs(length - Double(duration)) > 5 { return nil }
@@ -333,11 +333,11 @@ actor LyricsService {
         guard let data, let ttml = JSON(data: data)["ttml"].string, !ttml.isEmpty else { return nil }
         let lines = TTMLParser.parse(ttml)
         guard !lines.isEmpty else { return nil }
-        return Lyrics(provider: "BetterLyrics", isSynced: true, lines: lines)
+        return Lyrics(provider: "Better Lyrics", isSynced: true, lines: lines)
     }
 
     private func lrcLib(title: String, artist: String, album: String?, duration: Int) async -> Lyrics? {
-        let headers = ["User-Agent": "Metrolist+ for macOS (https://github.com/MetrolistGroup/Metrolist)"]
+        let headers = ["User-Agent": AppIdentity.userAgent]
         var record = JSON(nil)
         if duration > 0, let data = await get(
             "https://lrclib.net/api/get",

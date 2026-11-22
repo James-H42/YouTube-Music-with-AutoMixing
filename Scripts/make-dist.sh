@@ -77,7 +77,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSLocalNetworkUsageDescription</key><string>Lets a paired Android phone find and control Metrolist+ on your Wi-Fi when you switch on Device Connect.</string>
   <key>NSBonjourServices</key><array><string>_metrolist-connect._tcp</string></array>
   <key>NSSupportsAutomaticTermination</key><false/>
-  <key>NSHumanReadableCopyright</key><string>Unofficial macOS client for YouTube Music, with AutoMix. GPL-3.0.</string>
+  <key>NSHumanReadableCopyright</key><string>Unofficial macOS client for YouTube Music, with AutoMix. Inspired by Metrolist and not affiliated with it. GPL-3.0.</string>
 </dict>
 </plist>
 PLIST

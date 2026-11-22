@@ -145,7 +145,7 @@ enum AutoEQ {
         guard data.count <= maxBytes, let text = String(data: data, encoding: .utf8) else { throw EQError.notAProfile }
         let stem = url.deletingPathExtension().lastPathComponent
         let name = stem.replacingOccurrences(of: " ParametricEQ", with: "")
-        guard let result = parse(text, name: name.isEmpty ? "AutoEQ" : name) else { throw EQError.notAProfile }
+        guard let result = parse(text, name: name.isEmpty ? "AutoEq" : name) else { throw EQError.notAProfile }
         return result
     }
 
@@ -155,7 +155,7 @@ enum AutoEQ {
             switch self {
             case .badAddress: "Use a https://raw.githubusercontent.com/… address of a ParametricEQ.txt file."
             case .notFound: "That file couldn't be downloaded."
-            case .notAProfile: "That isn't an AutoEQ ParametricEQ.txt profile."
+            case .notAProfile: "That isn't an AutoEq ParametricEQ.txt profile."
             }
         }
     }

@@ -11,7 +11,7 @@ import MapKit
 /// fetched when its page is opened.
 enum MusicBrainzEvents {
     private static let pacer = Pacer(interval: 1.1)
-    private static let userAgent = "Metrolist+ for macOS (https://github.com/MetrolistGroup/Metrolist)"
+    private static let userAgent = AppIdentity.musicBrainzUserAgent
     /// Names per artist search, artists per event search, venues per place search.
     static let namesPerRequest = 8
     static let artistsPerRequest = 25
