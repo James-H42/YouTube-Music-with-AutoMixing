@@ -16,6 +16,10 @@ if [[ ! -f build/AppIcon.icns ]]; then
   swift Scripts/make-icon.swift build/AppIcon.iconset Resources/AppIcon-source.png >/dev/null 2>&1 && iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns || echo "warning: icon generation failed"
 fi
 [[ -f build/AppIcon.icns ]] && cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# AutoMix's beat model (Beat This!, MIT licence), its front-end constants and its licence notice,
+# so the app keeps it when it is moved out of the repository.
+mkdir -p "$APP/Contents/Resources/Models"
+cp -R Models/BeatThis.mlpackage Models/BeatThis-window.f32 Models/BeatThis-mel.f32 Models/BeatThis.json Models/BeatThis-LICENSE.txt "$APP/Contents/Resources/Models/"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -37,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSLocalNetworkUsageDescription</key><string>Lets a paired Android phone find and control Metrolist+ on your Wi-Fi when you switch on Device Connect.</string>
   <key>NSBonjourServices</key><array><string>_metrolist-connect._tcp</string></array>
   <key>NSSupportsAutomaticTermination</key><false/>
-  <key>NSHumanReadableCopyright</key><string>Unofficial macOS client for YouTube Music, with AutoMix. GPL-3.0.</string>
+  <key>NSHumanReadableCopyright</key><string>Unofficial macOS client for YouTube Music, with AutoMix. Inspired by Metrolist and not affiliated with it. GPL-3.0.</string>
 </dict>
 </plist>
 PLIST

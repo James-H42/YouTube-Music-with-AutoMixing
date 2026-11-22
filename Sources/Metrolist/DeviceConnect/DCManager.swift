@@ -24,7 +24,7 @@ struct DCPairedInfo: Identifiable, Hashable {
 ///  - pairing needs the same six-digit code approved on this Mac and on the phone;
 ///  - five failed pairings in fifteen minutes lock pairing for fifteen minutes;
 ///  - forgetting a device deletes its key and closes its connections at once;
-///  - the advertised name is "Metrolist (Mac)" unless the person changes it, never their own name.
+///  - the advertised name is "Metrolist+ (Mac)" unless the person changes it, never their own name.
 ///
 /// The same machinery runs twice. `shared` is for your own devices, which get full remote
 /// control. `guests` is the shared queue: a second, always-anonymous device identity with its

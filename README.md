@@ -10,6 +10,7 @@ and adds bit-perfect output, synced lyrics and a music-video player, in SwiftUI 
 
 <br/>
 
+[![Download the latest release](https://img.shields.io/github/v/release/James-H42/YouTube-Music-with-AutoMixing?label=download&color=34C759)](https://github.com/James-H42/YouTube-Music-with-AutoMixing/releases/latest)
 ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)
 ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
 ![SwiftUI · Liquid Glass](https://img.shields.io/badge/SwiftUI-Liquid%20Glass-0A84FF)
@@ -29,10 +30,10 @@ and adds bit-perfect output, synced lyrics and a music-video player, in SwiftUI 
 
 ## Overview
 
-This is a complete YouTube Music app for the Mac, written from scratch in Swift. It follows the
-design of the Android client [Metrolist](https://github.com/MetrolistGroup/Metrolist), so the
-application is named Metrolist+ on macOS. It is one Swift package and uses only
-Apple's frameworks, with no third-party dependencies.
+This is a complete YouTube Music app for the Mac, written from scratch in Swift. It is inspired by
+[Metrolist](https://github.com/MetrolistGroup/Metrolist)'s Android app and was built to be a desktop
+app native to macOS. Metrolist+ is a separate project not affiliated with, endorsed by or maintained by the Metrolist project.
+The app is one Swift package and uses only Apple's frameworks, with no third-party dependencies.
 
 Its main feature is AutoMix. Instead of a crossfade, AutoMix plans a transition for every pair of
 songs. It analyses each song on your Mac for tempo, beats and bars, key, harmony, sections and
@@ -45,7 +46,7 @@ transition, and you can edit any of them.
 
 Other features include: bit-perfect output to a DAC, word-synced lyrics, romaji support for
 Japanese, Chinese and Korean, a full-screen music-video player that plays up to 4K,
-Apple Music's animated covers, concerts near a place you choose, scrobbling, and a shared queue
+support for Apple Music's animated covers, display concerts near a place you choose, scrobbling, and a shared queue
 that friends can add to from the Metrolist mobile application (v14.0 and onwards).
 
 ---
@@ -91,13 +92,14 @@ cover slides away and the new one moves to the centre. The controls stay where t
    to keep the beats together. A Tempo match between unrelated songs may change speed by at most
    20 % and pitch by at most two semitones, the range real DJs almost always stay within. A tempo
    ramp can speed a song up by as much as 25 %, and songs that share a sample can go further.
-4. **It separates the stems, if you switch that on.** With "Mix with stems" on, HT-Demucs from
+4. **It separates the stems, when the model is installed.** "Mix with stems" is on by default, and
+   the release download includes the model it needs. HT-Demucs from
    [ICASSP 2023](https://doi.org/10.1109/ICASSP49357.2023.10096956) runs through Core ML. As soon
-   as the planner decides a transition, the app splits the two overlapping passages into vocals,
-   drums, bass and the rest. It follows the stem rules of
-   [Mosaikbox](https://doi.org/10.5281/zenodo.14877463). The outgoing vocals stop on the beat
-   before the incoming vocals start, the basslines swap halfway, and in blends the drums hand
-   over.
+   as the planner decides a transition with the beats matched, of two bars or more, the app splits
+   the two overlapping passages into vocals, drums, bass and the rest. It follows the stem rules of
+   [Mosaikbox](https://doi.org/10.5281/zenodo.14877463). When both songs sing at once, the outgoing
+   vocals stop on the beat before the incoming vocals start. The basslines swap halfway, and in
+   blends and tempo matches the drums hand over. Fades and loops play whole songs.
 5. **It orders the queue.** AutoMix re-orders the songs Autoplay lines up so each one mixes well
    out of the one before. The weights come from 501 transitions in 28 DJ-made sequences.
 
@@ -165,14 +167,14 @@ change, a set of transitions approved by ear must plan byte-for-byte the same. T
 #### Sound
 - Bit-perfect output, which runs the device at the song's own rate and leaves the samples untouched
 - Exclusive output in hog mode, and a live report of the signal path
-- An equaliser with presets and an AutoEQ headphone search
+- An equaliser with presets and an AutoEq headphone search
 - Loudness normalisation with Quiet, Normal and Loud targets, and a limiter
 
 </td>
     <td width="50%" valign="top">
 
 #### Lyrics
-- Word-synced karaoke lyrics from BetterLyrics, LRCLIB, SimpMusic, lrc.red and YouTube Music
+- Word-synced karaoke lyrics from Better Lyrics, LRCLIB, SimpMusic, lrc.red and YouTube Music
 - Readings for Japanese, Korean, Chinese as pinyin, Cyrillic, Greek, Thai and more
 - A choice of source order, a search of every source, and timing edits
 
@@ -209,7 +211,7 @@ change, a set of transitions approved by ear must plan byte-for-byte the same. T
 
 #### Your data
 - Backup and restore of your library, without your credentials
-- Imports from Metrolist, InnerTube, ViMusic and Kreate backups
+- Imports from Metrolist, InnerTune, ViMusic and Kreate backups
 - Playlist imports from Spotify, Apple Music, Deezer, CSV or text
 
 </td>
@@ -256,11 +258,19 @@ change, a set of transitions approved by ear must plan byte-for-byte the same. T
 - macOS 26 or later, on Apple silicon for the release build
 - The Xcode Command Line Tools with Swift 6.2, without the need for full Xcode
 
+### Download
+
+Download `Metrolist+.zip` from the
+[latest release](https://github.com/James-H42/YouTube-Music-with-AutoMixing/releases/latest), unzip
+it and move Metrolist+ to your Applications folder. The download includes both models and doesn't
+need the Command Line Tools. The first time you open the app, allow it in System Settings, under
+Privacy & Security.
+
 ### Build and run
 
 ```bash
-git clone <this repository>
-cd YT-Music-with-AutoMix
+git clone https://github.com/James-H42/YouTube-Music-with-AutoMixing.git
+cd YouTube-Music-with-AutoMixing
 
 Scripts/make-app.sh                 # builds build/Metrolist+.app
 open build/Metrolist+.app
@@ -275,12 +285,12 @@ Settings, under Privacy & Security.
 
 - `Models/BeatThis.mlpackage`, the Beat This! model of 10 MB, is in the repository, and the build
   bundles it.
-- `Models/HTDemucs.mlpackage`, the HT-Demucs model of about 200 MB, is too large for git. Without
-  it everything works, but transitions play whole songs and "Mix with stems" is unavailable. To
-  make it, set up the stems environment that [`Tools/ml/README.md`](Tools/ml/README.md)
-  describes, with torch 2.7, demucs 4.0.1 and coremltools 9. Then run
-  `convert_demucs.py ../../Models` from `Tools/ml`. `make-dist.sh` bundles the model when it is
-  there.
+- `Models/HTDemucs.mlpackage`, the HT-Demucs model of about 200 MB, is in the release download but
+  is too large for git. A build from source doesn't have it until you make it. Without it everything
+  works, but transitions play whole songs and "Mix with stems" is unavailable. To make it, set up
+  the stems environment that [`Tools/ml/README.md`](Tools/ml/README.md) describes, with torch 2.7,
+  demucs 4.0.1 and coremltools 9. Then run `convert_demucs.py ../../Models` from `Tools/ml`.
+  `make-dist.sh` bundles the model when it is there.
 
 ### First steps
 
@@ -404,12 +414,13 @@ time, a phase lock keeps the beats together, and afterwards each song eases back
 and pitch.
 
 `Mix/StemSeparator.swift` runs HT-Demucs, under the MIT licence, through Core ML when "Mix with
-stems" is on. As soon as the planner decides a transition with the beats matched, it splits the two
-stretches of the overlap into vocals, drums, bass and the rest, and caches them. In the overlap the
-outgoing vocals stop on the beat before the incoming vocals start, the basslines swap halfway, and
-in blends the drums hand over. These rules follow Mosaikbox by Sowula and Knees from ISMIR 2024. If
-the stems are not ready in time, the engine makes the bass swap with the EQ. Without the model,
-transitions play whole songs.
+stems" is on, which is the default, and the model is installed. As soon as the planner decides a
+transition with the beats matched, of two bars or more, it splits the two stretches of the overlap
+into vocals, drums, bass and the rest, and caches them. When both songs sing at once in the overlap,
+the outgoing vocals stop on the beat before the incoming vocals start. The basslines swap halfway,
+and in blends and tempo matches the drums hand over. These rules follow Mosaikbox by Sowula and
+Knees from ISMIR 2024. If the stems are not ready in time, the engine makes the bass swap with the
+EQ. Without the model, transitions play whole songs.
 
 `UI/Player/MixEditorView.swift` is the editor. Drag a waveform to move its mix point, drag curve
 points, or pick a preset or another of AutoMix's proposals. A proposal or preset you pick only
@@ -461,14 +472,14 @@ changing it.
 **Signal path.** The Sound pane of Settings shows each stage and says whether the path is
 bit-perfect.
 
-**AutoEQ headphone search.** In the equaliser, choose Find Your Headphones under Profile.
+**AutoEq headphone search.** In the equaliser, choose Find Your Headphones under Profile.
 
 Three LastWave features were left out. Lossless add-ons stream Tidal through third-party servers
 with DRM decryption and need a paid service. DSD playback has no DSD sources here. The "Studio
 Master Clarity" enhancer colours the sound.
 
 The equaliser comes from Metrolist v14. Open it from the Window menu or with ⇧⌘E. It has presets,
-editable bands, a preamp and AutoEQ import. It sits after AutoMix's mixing, so transitions are
+editable bands, a preamp and AutoEq import. It sits after AutoMix's mixing, so transitions are
 unchanged, and it is bypassed when flat. Loudness normalisation has Quiet, Normal and Loud targets
 and an optional boost of up to 3 dB. A limiter keeps added gain from clipping. An output button in
 the player bar picks any speaker, including AirPlay ones, and the Mac still renders the mix.
@@ -480,10 +491,9 @@ the player bar picks any speaker, including AirPlay ones, and the Mac still rend
 
 <br/>
 
-These features came in from Metrolist v14. The plan, and the reasons for what was left out, are in
-`docs/Metrolist v14 integration plan.md`.
+These features came in from Metrolist v14.
 
-**Lyrics.** SimpMusic and lrc.red join BetterLyrics, LRCLIB and YouTube Music. You can set the
+**Lyrics.** SimpMusic and lrc.red join Better Lyrics, LRCLIB and YouTube Music. You can set the
 order in which the app asks the sources, prefer word-synced lyrics, search every source and edit
 timings. AutoMix plans a pair again when a song's lyrics change.
 
@@ -491,7 +501,7 @@ timings. AutoMix plans a pair again when a song's lyrics change.
 listens made offline. With AutoMix on, a song counts from the hand-over.
 
 **Your data.** Back Up Library and Restore in the File menu save and restore your library, without
-any credentials. The app imports Metrolist, InnerTube, ViMusic and Kreate backups. It imports
+any credentials. The app imports Metrolist, InnerTune, ViMusic and Kreate backups. It imports
 playlists from Spotify, Apple Music and Deezer addresses, or from a CSV or text file. For private
 and collaborative Spotify playlists it opens Exportify inside the app.
 
@@ -502,10 +512,10 @@ acts.
 
 **Device Connect.** A paired Android phone running Metrolist can control this Mac. The setting is in
 the Devices pane of Settings and is off by default. The phone is the remote, and AutoMix keeps
-running on the Mac. The security review is in `docs/Device Connect protocol review.md`.
+running on the Mac.
 
-Casting to Google Cast, FCast and DLNA was left out, for the reasons in `docs/Casting threat
-model.md`.
+Casting to Google Cast, FCast and DLNA was left out, because without device authentication another
+device on the network could pose as the receiver and collect the audio.
 
 </details>
 
@@ -549,8 +559,7 @@ Shared Queue lets other people on your network add songs to what this Mac is pla
 Spotify's Jam does. Open it from the sidebar, the people button in the player bar, the Window menu,
 or ⇧⌘J. This Mac stays the player, so AutoMix mixes the guests' songs in like any other. Guests join
 from Metrolist on Android, through its device picker and this Mac's "Shared queue" entry, or from
-this app on another Mac, through the "Join a Shared Queue" side of the same window. The design,
-research and security reasoning are in `docs/Shared queue design.md`.
+this app on another Mac, through the "Join a Shared Queue" side of the same window.
 
 **It is off until you start it.** The app never restores a shared queue at launch. Ending it, or
 quitting, closes every guest connection and the listener.
@@ -650,7 +659,8 @@ turns the beat model off, and `METROLIST_MODELS=dir` points at another model fol
 by Google, YouTube, YouTube Music, Spotify, Apple, Ticketmaster, MusicBrainz, Genius, WhoSampled,
 Last.fm, ListenBrainz, Discord or the Metrolist or LastWave projects.** All product and company
 names are trademarks of their respective owners. This README uses them only to say what this
-software works with.
+software works with. Metrolist+ is inspired by Metrolist and has no connection to its developers.
+Please report problems with Metrolist+ in this repository and not to the Metrolist project.
 
 **Personal use only.** The app plays audio from YouTube Music through the same interfaces its own
 web client uses. It is provided for personal, non-commercial use with your own account. It is not a
@@ -674,7 +684,7 @@ cached audio. The folder keeps that name under Metrolist+, so an existing librar
 **Online lookups.** If "Look up known samples online" is on, the app sends the title and artist of
 the playing and next songs to musicbrainz.org, and to Genius if you add a token. You can switch this
 off in the AutoMix pane of Settings. The app also sends song titles, artists and lengths to the
-lyrics sources you leave on in the Lyrics pane of Settings, which are BetterLyrics, LRCLIB,
+lyrics sources you leave on in the Lyrics pane of Settings, which are Better Lyrics, LRCLIB,
 SimpMusic and lrc.red. It sends what you play to Last.fm or ListenBrainz if you sign in to them.
 Concerts sends artist names to MusicBrainz, and to Ticketmaster if you add your key, and sends the
 place you type to Apple Maps. The app downloads the AI-artist blocklist from GitHub when that filter
@@ -709,12 +719,12 @@ GPL requires.
 - [Metrolist](https://github.com/MetrolistGroup/Metrolist) gave the design this app follows, and
   the way it talks to YouTube Music.
 - [LastWave](https://github.com/Clash-Projects/LastWave-Native) gave bit-perfect output, the signal
-  path and the AutoEQ search.
+  path and the AutoEq search.
 - [Beat This!](https://github.com/CPJKU/beat_this), under MIT, is the beat and bar-line model.
 - [HT-Demucs](https://github.com/facebookresearch/demucs), under MIT, separates the stems.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) provides the EJS solver for signed-in playback.
-- MusicBrainz and Genius provide sample links. BetterLyrics, LRCLIB, SimpMusic and lrc.red provide
-  lyrics. [AutoEQ](https://github.com/jaakkopasanen/AutoEq) provides headphone curves.
+- MusicBrainz and Genius provide sample links. Better Lyrics, LRCLIB, SimpMusic and lrc.red provide
+  lyrics. [AutoEq](https://github.com/jaakkopasanen/AutoEq) provides headphone curves.
 
 **Research**
 

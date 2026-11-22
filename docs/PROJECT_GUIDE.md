@@ -4,7 +4,7 @@ Read this first when continuing development. It gives the state of the project, 
 organised, the rules the owner has set (with their reasons), how to build and test, and what is
 still open. Features are described for users in `README.md`; this guide does not repeat them.
 
-Last updated: 2026-11-22 (morning, merged branch). Update the "Status" and "Open items" sections at
+Last updated: 2026-11-22 (afternoon, after the v2.0 release). Update the "Status" and "Open items" sections at
 the end of any session that changes them, and keep the rest in step with the code.
 
 ## What this is
@@ -378,7 +378,32 @@ why it works the way it does:
   - `Components/SongViews.swift`: `SongList`, where row clicks are not "chosen" except with
     `playsVideos`.
 
-## Status (2026-11-22, merged branch)
+## Status (2026-11-22, v2.0 released)
+
+The owner pushed `dev`, merged it into `main` and published v2.0 on GitHub with `Metrolist+.zip`.
+The repository's current address is `github.com/James-H42/YouTube-Music-with-AutoMixing`. The
+local `origin` still uses the old name, which GitHub redirects. Afternoon session, for v2.0.1:
+`README.md` has a download badge, a Download section and a working clone command, and
+`docs/images/social-preview.jpg` (1280 x 640) is for the repository settings.
+`docs/RELEASE_NOTES_v2.0.md` (git-ignored) is a draft for the release page. The notes below are
+from before the release.
+
+Second part of that session, also for v2.0.1:
+- Names. The project is YouTube Music with AutoMix, the repository YouTube-Music-with-AutoMixing,
+  the app Metrolist+ and the mixing system AutoMix. Credits were checked against upstream: AutoEq,
+  Better Lyrics, and InnerTune for the Android app whose backups are imported. InnerTube is
+  YouTube's API and the source folder.
+- The owner was inspired by Metrolist's Android app and wanted a desktop app native to the macOS
+  user experience. `README.md` and the drafts say so. They, the app's copyright text and the bug
+  report form also say that it is not affiliated with Metrolist. Requests no longer give Metrolist's
+  repository as the contact. MusicBrainz gets this repository's address, with the owner's approval
+  (`AppIdentity.musicBrainzUserAgent`). Genius and LRCLIB get `AppIdentity.userAgent`, without it.
+- The owner decided to keep Metrolist's Discord application as the default.
+- `Scripts/make-app.sh` bundles Beat This! with its licence. `README.md` describes stems as they
+  work and no longer names git-ignored documents.
+- `.github/ISSUE_TEMPLATE/bug_report.yml` is new.
+- Checks on a release build: `--featuretest` 47/47, `--soundtest` 17/17, and `--beatmodeltest` 6/6
+  from the `make-app.sh` app moved out of its folder.
 
 Everything up to the music-video work and album header redesign is committed on `dev`
 (`14aa15f`). The two branches of 2026-11-21 were each committed at the owner's request and
@@ -610,10 +635,11 @@ Design notes for earlier work are in the main checkout's `docs/` (git-ignored, n
 ## Open items
 
 Waiting on the owner:
-- Push `dev`: on 2026-11-22 it was fast-forwarded locally to `main` (which holds the merged
-  branch and the owner's README edits) and is 4 commits ahead of `origin/dev`. The branches
-  `claude/automix-all-styles`, `claude/session-2026-11-21` and `claude/merge-2026-11-21` and
-  their worktrees were removed after their local-only files were moved into the main folder.
+- On GitHub: upload `docs/images/social-preview.jpg`, set the Website field, pin the repository and
+  paste the v2.0 release notes.
+- Publishing v2.0.1: the v2.0 zip predates the names, affiliation text and request identifier above.
+  `Scripts/make-dist.sh 2.0.1` was tested in a copy on 2026-11-22.
+- `Scripts/make-app.sh` still writes version 1.0.
 - A look at Settings › Playback with bit-perfect output and AutoMix both on: it should show
   AutoMix paused (the playback side was checked live on 2026-11-21).
 - In the real app: a music video in macOS full screen (no band at the top while the controls
@@ -623,7 +649,7 @@ Waiting on the owner:
   bit-perfect off; Japanese word-synced lyrics beside a music video; scrubbing near a
   transition (it should still mix); listening to pairs that used to be big Tempo matches (now
   mostly fades or sound matches).
-- `README.md` and `docs/images/` are new: review before pushing.
+- The README changes of 2026-11-22 (afternoon): review before committing.
 - A visual check of the full-screen player's title bar (no grey band) in a maximised and a
   tiled window; offscreen captures can't show it. Window tiling itself couldn't be exercised
   (the debug build has no Window › Fill item); the window frame stays the same.

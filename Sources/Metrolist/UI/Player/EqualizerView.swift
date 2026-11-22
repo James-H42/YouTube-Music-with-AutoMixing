@@ -39,7 +39,7 @@ struct EqualizerView: View {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url), data.count <= AutoEQ.maxBytes, let text = String(data: data, encoding: .utf8),
                   let parsed = AutoEQ.parse(text, name: url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: " ParametricEQ", with: ""))
-            else { notice = "That isn't an AutoEQ ParametricEQ.txt profile."; return }
+            else { notice = "That isn't an AutoEq ParametricEQ.txt profile."; return }
             adopt(parsed)
         }
         .alert("Save profile", isPresented: $askingName) {
@@ -83,9 +83,9 @@ struct EqualizerView: View {
                     ForEach(eq.saved) { profile in Button(profile.name) { eq.choose(profile) } }
                 }
                 Divider()
-                Button("Find Your Headphones (AutoEQ)…") { searchingHeadphones = true }
-                Button("Import AutoEQ File…") { importing = true }
-                Button("Import AutoEQ from Web…") { address = ""; askingURL = true }
+                Button("Find Your Headphones (AutoEq)…") { searchingHeadphones = true }
+                Button("Import AutoEq File…") { importing = true }
+                Button("Import AutoEq from Web…") { address = ""; askingURL = true }
                 Button("Save Current As…") { name = eq.profile.name; askingName = true }
                 if !eq.saved.isEmpty {
                     Menu("Delete Saved Profile") {
@@ -246,7 +246,7 @@ struct HeadphoneSearchSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Find Your Headphones").font(.headline)
-            Text("AutoEQ corrects a headphone's measured frequency response towards a neutral target. Search \(entries.isEmpty ? "the AutoEq catalogue" : "\(entries.count.formatted()) measurements") by name.")
+            Text("AutoEq corrects a headphone's measured frequency response towards a neutral target. Search \(entries.isEmpty ? "the AutoEq catalogue" : "\(entries.count.formatted()) measurements") by name.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             TextField("Headphone or earphone name", text: $query)

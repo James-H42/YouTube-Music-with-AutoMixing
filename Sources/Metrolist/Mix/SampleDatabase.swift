@@ -64,7 +64,6 @@ actor SampleDatabase {
     static let shared = SampleDatabase()
 
     static let file = AppPaths.root.appendingPathComponent("samples.json")
-    private static let agent = "MetrolistAutoMix/1.0 (macOS music player; sample lookup)"
     private static let refreshAfter: TimeInterval = 60 * 24 * 3600
 
     private var cache: [String: SampleInfo]
@@ -135,7 +134,7 @@ actor SampleDatabase {
             if wait > 0 { try? await Task.sleep(for: .milliseconds(Int(wait * 1000))) }
             lastRequest = Date()
             var request = URLRequest(url: url, timeoutInterval: 20)
-            request.setValue(Self.agent, forHTTPHeaderField: "User-Agent")
+            request.setValue(token == nil ? AppIdentity.musicBrainzUserAgent : AppIdentity.userAgent, forHTTPHeaderField: "User-Agent")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             guard let (data, response) = try? await URLSession.shared.data(for: request) else { continue }

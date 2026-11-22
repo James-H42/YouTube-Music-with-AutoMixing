@@ -1,5 +1,12 @@
 import Foundation
 
+/// How the app names itself to the services it asks, such as MusicBrainz and LRCLIB.
+enum AppIdentity {
+    static let userAgent = "Metrolist+/2.0 (unofficial macOS app, not affiliated with Metrolist)"
+    /// For MusicBrainz only, which asks every client for a contact address.
+    static let musicBrainzUserAgent = "Metrolist+/2.0 (https://github.com/James-H42/YouTube-Music-with-AutoMixing; unofficial macOS app, not affiliated with Metrolist)"
+}
+
 /// On-disk locations, all under ~/Library/Application Support/Metrolist.
 enum AppPaths {
     static let root: URL = {
